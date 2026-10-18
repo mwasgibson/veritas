@@ -4,6 +4,12 @@
  */
 
 import { InstantWidget } from '../types';
+import {
+  getMachineStorageInfo,
+  getMachineSystemInfo,
+  getMachineActivityInfo,
+  getDateCalendarInfo,
+} from './machineTelemetry';
 
 const CITY_TIMEZONES: Record<string, string> = {
   london: 'Europe/London',
@@ -145,8 +151,8 @@ export async function resolveInstantAnswer(query: string): Promise<InstantWidget
     };
   }
 
-  // 2. Date Queries
-  // e.g. "date", "today", "today's date", "what is the date", "what day is it", "current date"
+  // 2. Date & Calendar Queries
+  // e.g. "date", "today", "today's date", "what is the date", "what day is it", "current date", "calendar", "day"
   const isDateQuery =
     q === 'date' ||
     q === 'the date' ||
@@ -160,27 +166,126 @@ export async function resolveInstantAnswer(query: string): Promise<InstantWidget
     /^(what('?s| is)? )?(today('?s)? )?date|what day is it|current date|today('?s)? date/i.test(q);
 
   if (isDateQuery) {
+    const dateData = getDateCalendarInfo();
     const now = new Date();
-    const primaryValue = new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }).format(now);
-
-    const secondaryValue = new Intl.DateTimeFormat('en-US', {
+    const liveTime = new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
       minute: '2-digit',
+      second: '2-digit',
       hour12: true,
     }).format(now);
 
     return {
-      type: 'time',
-      title: "Today's Date",
-      primaryValue,
-      secondaryValue: `Current time: ${secondaryValue}`,
-      details: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      source: 'Veritas System Calendar',
+      type: 'date',
+      title: "Today's Date & Calendar",
+      primaryValue: dateData.formattedDate,
+      secondaryValue: `Day ${dateData.dayOfYear} of ${dateData.totalDaysInYear} (${dateData.percentOfYear}% of year) · Week ${dateData.weekNumber}`,
+      details: `${dateData.daysRemainingInYear} days remaining in ${now.getFullYear()} · Time: ${liveTime} (${dateData.timeZone})`,
+      source: 'Veritas System Calendar (Local Precision)',
+      dateData,
+    };
+  }
+
+  // 3. Storage Capacity Queries
+  // e.g. "storage", "storage capacity", "disk space", "disk", "storage info", "drive space", "how much storage", "quota"
+  const isStorageQuery =
+    q === 'storage' ||
+    q === 'storage capacity' ||
+    q === 'disk' ||
+    q === 'disk space' ||
+    q === 'disk usage' ||
+    q === 'storage info' ||
+    q === 'storage limit' ||
+    q === 'drive space' ||
+    q === 'hard drive' ||
+    q === 'storage quota' ||
+    q === 'quota' ||
+    /\b(storage capacity|disk space|how much storage|storage usage|storage quota|drive space)\b/i.test(q) ||
+    /^(how much )?(storage|disk space|disk|memory space) (do i have|is left|is available|used)/i.test(q) ||
+    /^(what('?s| is)? )?(my )?(storage|storage capacity|disk space|drive space|storage quota)/i.test(q);
+
+  if (isStorageQuery) {
+    const storageInfo = await getMachineStorageInfo();
+    return {
+      type: 'storage',
+      title: 'Local Machine Storage Capacity',
+      primaryValue: `${storageInfo.usedFormatted} used of ${storageInfo.quotaFormatted}`,
+      secondaryValue: `${storageInfo.freeFormatted} available (${storageInfo.percentUsed}% consumed)`,
+      details: `Client Storage: ${storageInfo.vaultDocsCount} IndexedDB vault documents (${storageInfo.vaultSizeFormatted})${storageInfo.connectedFolder ? ` · Folder: ${storageInfo.connectedFolder}` : ''}`,
+      source: 'Client Storage Quota & IndexedDB Manager (Local)',
+      storageData: storageInfo,
+    };
+  }
+
+  // 4. System, Machine & Hardware Specifications Queries
+  // e.g. "machine info", "system info", "system specs", "my machine", "computer info", "specs", "device info", "os", "what os", "hardware"
+  const isSystemQuery =
+    q === 'machine' ||
+    q === 'machine info' ||
+    q === 'my machine' ||
+    q === 'system' ||
+    q === 'system info' ||
+    q === 'system specs' ||
+    q === 'specs' ||
+    q === 'computer info' ||
+    q === 'device info' ||
+    q === 'device specs' ||
+    q === 'hardware' ||
+    q === 'os' ||
+    q === 'what os' ||
+    q === 'operating system' ||
+    /^(what('?s| is)? )?(my )?(system info|machine info|device specs|computer specs|hardware|operating system|os)/i.test(q) ||
+    /\b(system info|machine specs|system specs|device specs|hardware info)\b/i.test(q);
+
+  if (isSystemQuery) {
+    const systemInfo = await getMachineSystemInfo();
+    return {
+      type: 'system',
+      title: 'Local Machine & System Specifications',
+      primaryValue: `${systemInfo.os} · ${systemInfo.cpuCores} Logical CPU Cores`,
+      secondaryValue: `${systemInfo.browser} · ${systemInfo.screenResolution} Display (${systemInfo.pixelRatio}x DPI)`,
+      details: `Storage: ${systemInfo.storage.usedFormatted} used of ${systemInfo.storage.quotaFormatted} · Network: ${systemInfo.isOnline ? 'Online' : 'Offline'}${systemInfo.deviceMemoryGb ? ` · RAM: ${systemInfo.deviceMemoryGb}` : ''}`,
+      source: 'Local Client Hardware & Runtime Inspector (Zero-Cloud)',
+      systemData: systemInfo,
+      storageData: systemInfo.storage,
+    };
+  }
+
+  // 5. What I Have Done / Changed Queries (Audit trail, Activity log, History)
+  // e.g. "what i have done", "what have i done", "what did i change", "what i changed", "my changes", "recent changes", "changes", "history", "recent activity", "activity log", "audit log", "changelog"
+  const isActivityQuery =
+    q === 'what i have done' ||
+    q === 'what have i done' ||
+    q === 'what i changed' ||
+    q === 'what did i change' ||
+    q === 'what did i do' ||
+    q === 'what changed' ||
+    q === 'changes' ||
+    q === 'my changes' ||
+    q === 'recent changes' ||
+    q === 'history' ||
+    q === 'activity' ||
+    q === 'my activity' ||
+    q === 'recent activity' ||
+    q === 'activity log' ||
+    q === 'audit log' ||
+    q === 'changelog' ||
+    q === 'actions' ||
+    q === 'my actions' ||
+    q === 'recent actions' ||
+    /what (i have done|have i done|did i change|did i do|i changed|changed)/i.test(q) ||
+    /^(my )?(changes|activity|history|actions|recent activity|recent changes)$/i.test(q);
+
+  if (isActivityQuery) {
+    const activityInfo = await getMachineActivityInfo();
+    return {
+      type: 'activity',
+      title: 'Local Machine Activity & Changes Log',
+      primaryValue: `${activityInfo.totalEvents} recorded actions on this machine`,
+      secondaryValue: `${activityInfo.ingestCount} documents indexed · ${activityInfo.queryCount} queries executed · ${activityInfo.purgeCount} deleted`,
+      details: `Latest action: ${activityInfo.lastActionSummary}`,
+      source: 'Veritas Cryptographic Audit Trail (SHA-256 Tamper-Evident)',
+      activityData: activityInfo,
     };
   }
 

@@ -19,6 +19,17 @@ import {
   FileText,
   Calculator,
   Calendar,
+  HardDrive,
+  Cpu,
+  Activity,
+  History,
+  Laptop,
+  ShieldCheck,
+  Database,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { SearchResultItem, SearchSettings, ConversationalAnswer, DocumentItem, InstantWidget } from '../types';
 
@@ -38,6 +49,7 @@ interface SearchViewProps {
   isUnlocked: boolean;
   onOpenUnlockModal: () => void;
   allDocuments: DocumentItem[];
+  onNavigateTab?: (tab: 'search' | 'vault' | 'browser' | 'audit' | 'docs') => void;
 }
 
 export const SearchView: React.FC<SearchViewProps> = ({
@@ -56,6 +68,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   isUnlocked,
   onOpenUnlockModal,
   allDocuments,
+  onNavigateTab,
 }) => {
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
@@ -362,6 +375,73 @@ export const SearchView: React.FC<SearchViewProps> = ({
               </span>
             </div>
           )}
+
+          {/* Quick Machine Inquiries Grid */}
+          <div className="mt-6">
+            <div className="text-[11px] font-mono text-neutral-400 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+              <span>Local Machine & System Inquiries</span>
+              <span className="text-neutral-500">Zero Cloud · Real Hardware Telemetry</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono">
+              {[
+                {
+                  label: 'The Time',
+                  q: 'the time',
+                  desc: 'Precision local clock & world time',
+                  icon: <Clock className="w-3.5 h-3.5 text-blue-400" />,
+                },
+                {
+                  label: "Today's Date",
+                  q: "today's date",
+                  desc: 'Day of year, ISO week & calendar',
+                  icon: <Calendar className="w-3.5 h-3.5 text-emerald-400" />,
+                },
+                {
+                  label: 'Storage Capacity',
+                  q: 'storage capacity',
+                  desc: 'Disk space, quota & vault metrics',
+                  icon: <HardDrive className="w-3.5 h-3.5 text-purple-400" />,
+                },
+                {
+                  label: 'What I Have Done',
+                  q: 'what i have done',
+                  desc: 'Recent changes & activity history',
+                  icon: <Activity className="w-3.5 h-3.5 text-amber-400" />,
+                },
+                {
+                  label: 'Machine Specs',
+                  q: 'machine specs',
+                  desc: 'OS, CPU cores, RAM & display',
+                  icon: <Laptop className="w-3.5 h-3.5 text-cyan-400" />,
+                },
+                {
+                  label: 'Audit Trail',
+                  q: 'audit log',
+                  desc: 'SHA-256 tamper-evident ledger',
+                  icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />,
+                },
+              ].map(item => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    onQueryChange(item.q);
+                    onSearch(item.q, settings);
+                  }}
+                  className="p-3 text-left rounded-xl bg-neutral-900/60 hover:bg-neutral-900 border border-neutral-800/80 hover:border-neutral-700 transition-all cursor-pointer group flex flex-col justify-between"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {item.icon}
+                    <span className="font-semibold text-neutral-200 group-hover:text-white transition-colors">
+                      {item.label}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-neutral-500 font-sans leading-tight">
+                    {item.desc}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -389,18 +469,22 @@ export const SearchView: React.FC<SearchViewProps> = ({
         </div>
       )}
 
-      {/* Instant Answer / Real-Time Live Utility Card (Time, Clock, Calculator, Direct Facts) */}
+      {/* Instant Answer / Real-Time Live Utility Card (Time, Date, Storage, System, Activity, Calculator, Direct Facts) */}
       {instantWidget && (
         <div className="mb-6 p-5 rounded-xl bg-neutral-900 border border-neutral-700/80 shadow-xl">
           <div className="flex items-center justify-between text-xs text-neutral-400 font-mono mb-2">
             <span className="flex items-center gap-1.5 uppercase font-semibold text-neutral-300">
               {instantWidget.type === 'time' && <Clock className="w-3.5 h-3.5 text-blue-400" />}
+              {instantWidget.type === 'date' && <Calendar className="w-3.5 h-3.5 text-emerald-400" />}
+              {instantWidget.type === 'storage' && <HardDrive className="w-3.5 h-3.5 text-purple-400" />}
+              {instantWidget.type === 'system' && <Laptop className="w-3.5 h-3.5 text-cyan-400" />}
+              {instantWidget.type === 'activity' && <Activity className="w-3.5 h-3.5 text-amber-400" />}
               {instantWidget.type === 'calculator' && <Calculator className="w-3.5 h-3.5 text-emerald-400" />}
               {instantWidget.type === 'definition' && <BookOpen className="w-3.5 h-3.5 text-amber-400" />}
               {instantWidget.type === 'direct_answer' && <Sparkles className="w-3.5 h-3.5 text-blue-400" />}
               <span>{instantWidget.title}</span>
             </span>
-            <span className="text-[11px] text-neutral-500">
+            <span className="text-[11px] text-neutral-500 font-mono">
               {instantWidget.source}
             </span>
           </div>
@@ -453,6 +537,478 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     {item.label}
                   </button>
                 ))}
+              </div>
+            </div>
+          ) : instantWidget.type === 'date' ? (
+            <div>
+              <div className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-2">
+                {instantWidget.primaryValue}
+              </div>
+              <div className="text-xs font-mono text-emerald-400 mb-4">
+                {instantWidget.secondaryValue}
+              </div>
+
+              {/* Day of Year Progress Bar */}
+              {instantWidget.dateData && (
+                <div className="mb-4 p-3 rounded-lg bg-neutral-950 border border-neutral-800">
+                  <div className="flex items-center justify-between text-xs font-mono text-neutral-400 mb-1.5">
+                    <span>Year Progress ({new Date().getFullYear()})</span>
+                    <span className="text-neutral-200 font-semibold">{instantWidget.dateData.percentOfYear}% elapsed</span>
+                  </div>
+                  <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      style={{ width: `${Math.min(100, Math.max(1, instantWidget.dateData.percentOfYear))}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono text-neutral-500 mt-1.5">
+                    <span>Day {instantWidget.dateData.dayOfYear} of {instantWidget.dateData.totalDaysInYear}</span>
+                    <span>{instantWidget.dateData.daysRemainingInYear} days remaining</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Calendar Details Grid */}
+              {instantWidget.dateData && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-4">
+                  <div className="p-2.5 rounded bg-neutral-950/60 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">ISO Week</div>
+                    <div className="text-neutral-200 font-semibold text-sm">Week {instantWidget.dateData.weekNumber}</div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/60 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Year Type</div>
+                    <div className="text-neutral-200 font-semibold text-sm">
+                      {instantWidget.dateData.isLeapYear ? 'Leap Year' : 'Common Year'}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/60 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Timezone</div>
+                    <div className="text-neutral-200 font-semibold text-xs truncate" title={instantWidget.dateData.timeZone}>
+                      {instantWidget.dateData.timeZone}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/60 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Unix Seconds</div>
+                    <div className="text-neutral-200 font-semibold text-xs tabular-nums">
+                      {instantWidget.dateData.unixSeconds}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Related Machine Queries */}
+              <div className="pt-3 border-t border-neutral-800/80 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-neutral-500 font-mono">Quick Inquiries:</span>
+                {[
+                  { label: 'The Time', q: 'the time' },
+                  { label: 'Storage Capacity', q: 'storage capacity' },
+                  { label: 'Machine Specs', q: 'machine specs' },
+                  { label: 'What I Have Done', q: 'what i have done' },
+                ].map(item => (
+                  <button
+                    key={item.label}
+                    onClick={() => {
+                      onQueryChange(item.q);
+                      onSearch(item.q, settings);
+                    }}
+                    className="px-2 py-0.5 text-[11px] font-mono rounded bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800/80 hover:border-neutral-600 transition-colors cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : instantWidget.type === 'storage' ? (
+            <div>
+              <div className="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+                <div>
+                  <div className="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight tabular-nums">
+                    {instantWidget.storageData ? instantWidget.storageData.usedFormatted : instantWidget.primaryValue}
+                  </div>
+                  <div className="text-xs font-mono text-neutral-400">
+                    used of {instantWidget.storageData?.quotaFormatted || 'allocated machine storage'}
+                  </div>
+                </div>
+                {instantWidget.storageData && (
+                  <div className="text-right">
+                    <div className="text-lg font-mono font-semibold text-emerald-400 tabular-nums">
+                      {instantWidget.storageData.freeFormatted}
+                    </div>
+                    <div className="text-[11px] font-mono text-neutral-500">Free Machine Space</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Storage Quota Progress Bar */}
+              {instantWidget.storageData && (
+                <div className="mb-4 p-3 rounded-lg bg-neutral-950 border border-neutral-800">
+                  <div className="flex items-center justify-between text-xs font-mono text-neutral-400 mb-1.5">
+                    <span>Machine Storage Quota</span>
+                    <span className="text-neutral-200 font-semibold tabular-nums">
+                      {instantWidget.storageData.percentUsed}% consumed
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        instantWidget.storageData.percentUsed > 85
+                          ? 'bg-rose-500'
+                          : instantWidget.storageData.percentUsed > 60
+                          ? 'bg-amber-500'
+                          : 'bg-purple-500'
+                      }`}
+                      style={{
+                        width: `${Math.min(100, Math.max(1, instantWidget.storageData.percentUsed || 1))}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono text-neutral-500 mt-1.5">
+                    <span>{instantWidget.storageData.usedFormatted} Indexed</span>
+                    <span>{instantWidget.storageData.quotaFormatted} System Limit</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Storage Telemetry Breakdown Grid */}
+              {instantWidget.storageData && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs font-mono mb-4">
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <FileText className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Vault Documents</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.storageData.vaultDocsCount} files
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {instantWidget.storageData.vaultSizeFormatted} indexed
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <Layers className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Vector Embeddings</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.storageData.vaultVectorsCount} vectors
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      64-dim embeddings
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Persistence</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100 truncate">
+                      {instantWidget.storageData.persisted ? 'Persisted' : 'Standard'}
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {instantWidget.storageData.persisted ? 'Protected from wipe' : 'Sandbox storage'}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <HardDrive className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Connected Folder</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100 truncate" title={instantWidget.storageData.connectedFolder || 'None'}>
+                      {instantWidget.storageData.connectedFolder ? 'Connected' : 'None'}
+                    </div>
+                    <div className="text-[11px] text-neutral-500 truncate mt-0.5" title={instantWidget.storageData.connectedFolder || 'Select a folder in Vault'}>
+                      {instantWidget.storageData.connectedFolder || 'Attach file explorer'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons & Quick Nav */}
+              <div className="pt-3 border-t border-neutral-800/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-neutral-500 font-mono">Related Queries:</span>
+                  {[
+                    { label: 'Machine Specs', q: 'machine specs' },
+                    { label: 'What I Have Done', q: 'what i have done' },
+                    { label: "Today's Date", q: "today's date" },
+                  ].map(item => (
+                    <button
+                      key={item.label}
+                      onClick={() => {
+                        onQueryChange(item.q);
+                        onSearch(item.q, settings);
+                      }}
+                      className="px-2 py-0.5 text-[11px] font-mono rounded bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800/80 hover:border-neutral-600 transition-colors cursor-pointer"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                {onNavigateTab && (
+                  <button
+                    onClick={() => onNavigateTab('vault')}
+                    className="px-3 py-1 text-xs font-medium rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Database className="w-3 h-3 text-purple-400" />
+                    <span>Manage Vault Storage</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : instantWidget.type === 'system' ? (
+            <div>
+              <div className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-1">
+                {instantWidget.systemData ? instantWidget.systemData.os : instantWidget.primaryValue}
+              </div>
+              <div className="text-xs font-mono text-cyan-400 mb-4">
+                {instantWidget.systemData ? `${instantWidget.systemData.cpuCores} Logical CPU Cores · ${instantWidget.systemData.browser}` : instantWidget.secondaryValue}
+              </div>
+
+              {/* System Specs Grid */}
+              {instantWidget.systemData && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono mb-4">
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Processor Cores</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.systemData.cpuCores} Logical Cores
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      Hardware Concurrency
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <Laptop className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Display & Canvas</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.systemData.screenResolution}
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {instantWidget.systemData.pixelRatio}x DPR · {instantWidget.systemData.colorDepth}-bit color
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Network Status</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100 flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${instantWidget.systemData.isOnline ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <span>{instantWidget.systemData.isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {instantWidget.systemData.connectionType || 'Standard Connection'}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <HardDrive className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Machine Storage</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.systemData.storage.usedFormatted} used
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      of {instantWidget.systemData.storage.quotaFormatted} quota
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Runtime Environment</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100 truncate">
+                      {instantWidget.systemData.browser}
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      WebAssembly & WebCrypto
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="flex items-center gap-1.5 text-neutral-400 text-[11px] mb-1">
+                      <Database className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Vault Files</span>
+                    </div>
+                    <div className="text-sm font-semibold text-neutral-100">
+                      {instantWidget.systemData.storage.vaultDocsCount} Indexed Files
+                    </div>
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {instantWidget.systemData.storage.vaultVectorsCount} Vectors
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Navigation Chips */}
+              <div className="pt-3 border-t border-neutral-800/80 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-neutral-500 font-mono">Quick Inquiries:</span>
+                {[
+                  { label: 'Storage Capacity', q: 'storage capacity' },
+                  { label: 'What I Have Done', q: 'what i have done' },
+                  { label: "Today's Date", q: "today's date" },
+                  { label: 'The Time', q: 'the time' },
+                ].map(item => (
+                  <button
+                    key={item.label}
+                    onClick={() => {
+                      onQueryChange(item.q);
+                      onSearch(item.q, settings);
+                    }}
+                    className="px-2 py-0.5 text-[11px] font-mono rounded bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800/80 hover:border-neutral-600 transition-colors cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : instantWidget.type === 'activity' ? (
+            <div>
+              <div className="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+                <div>
+                  <div className="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight">
+                    {instantWidget.activityData ? `${instantWidget.activityData.totalEvents} Actions Recorded` : instantWidget.primaryValue}
+                  </div>
+                  <div className="text-xs font-mono text-neutral-400 mt-0.5">
+                    Tamper-evident client ledger on this machine
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 px-2 py-1 rounded bg-neutral-950 border border-neutral-800">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>SHA-256 Verified</span>
+                </div>
+              </div>
+
+              {/* Category Counts Breakdown */}
+              {instantWidget.activityData && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-4">
+                  <div className="p-2.5 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Files Ingested</div>
+                    <div className="text-emerald-400 font-semibold text-base">
+                      {instantWidget.activityData.ingestCount}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Searches Run</div>
+                    <div className="text-blue-400 font-semibold text-base">
+                      {instantWidget.activityData.queryCount}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Files Removed</div>
+                    <div className="text-rose-400 font-semibold text-base">
+                      {instantWidget.activityData.purgeCount}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-neutral-950/70 border border-neutral-800/80">
+                    <div className="text-neutral-500 text-[10px] uppercase">Sync Bundles</div>
+                    <div className="text-purple-400 font-semibold text-base">
+                      {instantWidget.activityData.syncCount}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Changes List */}
+              {instantWidget.activityData && instantWidget.activityData.recentChanges.length > 0 ? (
+                <div className="mb-4 space-y-1.5">
+                  <div className="text-[11px] font-mono text-neutral-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Recent Activity & System Changes</span>
+                    <span className="text-neutral-500">Chronological</span>
+                  </div>
+                  {instantWidget.activityData.recentChanges.slice(0, 6).map((item, idx) => (
+                    <div
+                      key={item.id || idx}
+                      className="p-2.5 rounded bg-neutral-950/80 border border-neutral-800/70 flex items-start justify-between gap-3 text-xs font-mono"
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                            item.action === 'INGEST'
+                              ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/50'
+                              : item.action === 'QUERY'
+                              ? 'bg-blue-950/80 text-blue-400 border border-blue-800/50'
+                              : item.action === 'PURGE'
+                              ? 'bg-rose-950/80 text-rose-400 border border-rose-800/50'
+                              : item.action === 'SYNC' || item.action === 'EXPORT'
+                              ? 'bg-purple-950/80 text-purple-400 border border-purple-800/50'
+                              : 'bg-neutral-800 text-neutral-300 border border-neutral-700'
+                          }`}
+                        >
+                          {item.action}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-neutral-200 text-xs leading-snug break-words">
+                            {item.details}
+                          </div>
+                          <div className="text-[10px] text-neutral-500 mt-0.5 flex items-center gap-2">
+                            <span>Role: {item.actorRole}</span>
+                            <span aria-hidden="true">·</span>
+                            <span title="SHA-256 block hash" className="text-neutral-600">
+                              #{item.hashShort}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-neutral-400 shrink-0 tabular-nums">
+                        {item.relativeTime}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mb-4 p-4 rounded bg-neutral-950/60 border border-neutral-800 text-center text-xs text-neutral-500 font-mono">
+                  No activity has been recorded yet on this machine.
+                </div>
+              )}
+
+              {/* Action Buttons & Quick Nav */}
+              <div className="pt-3 border-t border-neutral-800/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-neutral-500 font-mono">Quick Inquiries:</span>
+                  {[
+                    { label: 'Storage Capacity', q: 'storage capacity' },
+                    { label: 'Machine Specs', q: 'machine specs' },
+                    { label: "Today's Date", q: "today's date" },
+                    { label: 'The Time', q: 'the time' },
+                  ].map(item => (
+                    <button
+                      key={item.label}
+                      onClick={() => {
+                        onQueryChange(item.q);
+                        onSearch(item.q, settings);
+                      }}
+                      className="px-2 py-0.5 text-[11px] font-mono rounded bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800/80 hover:border-neutral-600 transition-colors cursor-pointer"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                {onNavigateTab && (
+                  <button
+                    onClick={() => onNavigateTab('audit')}
+                    className="px-3 py-1 text-xs font-medium rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                    <span>View Full Audit Ledger</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                )}
               </div>
             </div>
           ) : instantWidget.type === 'calculator' ? (

@@ -161,10 +161,18 @@ export async function executeSearch(
     if (matchingDocItems.length > 0) {
       conversationalAnswer = synthesizeLocalAnswer(trimmed, matchingDocItems);
     } else if (instantWidget) {
-      // Direct synthesize from instant utility widget (Time, Date, Calculator)
+      // Direct synthesize from instant utility widget (Time, Date, Storage, System, Activity, Calculator)
       const answerText =
         instantWidget.type === 'time'
           ? `The current ${instantWidget.title.toLowerCase()} is ${instantWidget.primaryValue} (${instantWidget.secondaryValue}). ${instantWidget.details || ''}`
+          : instantWidget.type === 'date'
+          ? `Today's date is ${instantWidget.primaryValue}. ${instantWidget.secondaryValue}. ${instantWidget.details || ''}`
+          : instantWidget.type === 'storage'
+          ? `Local machine storage status: ${instantWidget.primaryValue} (${instantWidget.secondaryValue}). ${instantWidget.details || ''}`
+          : instantWidget.type === 'system'
+          ? `Your machine specifications: ${instantWidget.primaryValue}. Display & runtime: ${instantWidget.secondaryValue}. ${instantWidget.details || ''}`
+          : instantWidget.type === 'activity'
+          ? `Your machine activity history: ${instantWidget.primaryValue}. Breakdown: ${instantWidget.secondaryValue}. ${instantWidget.details || ''}`
           : instantWidget.type === 'calculator'
           ? `Calculation: ${instantWidget.secondaryValue || instantWidget.primaryValue}`
           : instantWidget.primaryValue;

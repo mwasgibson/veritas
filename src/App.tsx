@@ -223,6 +223,7 @@ export default function App() {
             isUnlocked={!!masterKey}
             onOpenUnlockModal={() => setIsUnlockModalOpen(true)}
             allDocuments={documents}
+            onNavigateTab={setCurrentTab}
           />
         )}
 

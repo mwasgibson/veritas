@@ -42,8 +42,70 @@ export interface VectorChunk {
   keywords: string[];
 }
 
+export interface StorageDetails {
+  usedBytes: number;
+  quotaBytes: number;
+  usedFormatted: string;
+  quotaFormatted: string;
+  freeFormatted: string;
+  percentUsed: number;
+  persisted: boolean;
+  vaultDocsCount: number;
+  vaultVectorsCount: number;
+  vaultSizeBytes: number;
+  vaultSizeFormatted: string;
+  connectedFolder?: string | null;
+}
+
+export interface SystemDetails {
+  os: string;
+  browser: string;
+  cpuCores: number;
+  deviceMemoryGb?: string;
+  screenResolution: string;
+  pixelRatio: number;
+  colorDepth: number;
+  isOnline: boolean;
+  connectionType?: string;
+  storage: StorageDetails;
+}
+
+export interface ActivityChangeItem {
+  id: string;
+  timestamp: number;
+  relativeTime: string;
+  action: string;
+  actorRole: string;
+  details: string;
+  hashShort: string;
+}
+
+export interface ActivityDetails {
+  totalEvents: number;
+  ingestCount: number;
+  queryCount: number;
+  purgeCount: number;
+  syncCount: number;
+  recentChanges: ActivityChangeItem[];
+  lastActionSummary?: string;
+}
+
+export interface DateCalendarDetails {
+  weekday: string;
+  formattedDate: string;
+  dayOfYear: number;
+  totalDaysInYear: number;
+  percentOfYear: number;
+  weekNumber: number;
+  daysRemainingInYear: number;
+  isLeapYear: boolean;
+  isoString: string;
+  unixSeconds: number;
+  timeZone: string;
+}
+
 export interface InstantWidget {
-  type: 'time' | 'calculator' | 'definition' | 'direct_answer';
+  type: 'time' | 'date' | 'storage' | 'system' | 'activity' | 'calculator' | 'definition' | 'direct_answer';
   title: string;
   primaryValue: string;
   secondaryValue?: string;
@@ -51,6 +113,10 @@ export interface InstantWidget {
   source?: string;
   sourceUrl?: string;
   timezone?: string;
+  storageData?: StorageDetails;
+  systemData?: SystemDetails;
+  activityData?: ActivityDetails;
+  dateData?: DateCalendarDetails;
 }
 
 export interface SearchResultItem {

@@ -185,7 +185,7 @@ export async function runAllUnitTests(): Promise<TestResult[]> {
     return `Verified cryptographic sync payload checksum and bundle re-import`;
   });
 
-  // 5. Instant Utility Answers Suite (Precision Clock, Date, Calculator)
+  // 5. Instant Utility Answers Suite (Precision Clock, Date, Storage, Activity, Calculator)
   await runTest('Instant Utility Answer: Time & World Clocks', 'Instant Answers', async () => {
     const { resolveInstantAnswer } = await import('./instantAnswers');
 
@@ -205,6 +205,37 @@ export async function runAllUnitTests(): Promise<TestResult[]> {
     }
 
     return `Verified local precision clock (${timeAns.primaryValue}), world time (${tokyoAns.primaryValue}), and math engine (${mathAns.primaryValue})`;
+  });
+
+  // 6. Machine Telemetry Suite (Date, Storage Capacity, Changes / Activity Log, System Specs)
+  await runTest('Local Machine Telemetry: Date, Storage, Activity Log & Specs', 'Machine Telemetry', async () => {
+    const { resolveInstantAnswer } = await import('./instantAnswers');
+
+    // 1. Date
+    const dateAns = await resolveInstantAnswer('today');
+    if (!dateAns || dateAns.type !== 'date' || !dateAns.dateData) {
+      throw new Error(`Failed to resolve "today", got: ${JSON.stringify(dateAns)}`);
+    }
+
+    // 2. Storage capacity
+    const storageAns = await resolveInstantAnswer('storage capacity');
+    if (!storageAns || storageAns.type !== 'storage' || !storageAns.storageData) {
+      throw new Error(`Failed to resolve "storage capacity", got: ${JSON.stringify(storageAns)}`);
+    }
+
+    // 3. What I have done / changed
+    const activityAns = await resolveInstantAnswer('what i have done');
+    if (!activityAns || activityAns.type !== 'activity' || !activityAns.activityData) {
+      throw new Error(`Failed to resolve "what i have done", got: ${JSON.stringify(activityAns)}`);
+    }
+
+    // 4. Machine specs
+    const systemAns = await resolveInstantAnswer('machine specs');
+    if (!systemAns || systemAns.type !== 'system' || !systemAns.systemData) {
+      throw new Error(`Failed to resolve "machine specs", got: ${JSON.stringify(systemAns)}`);
+    }
+
+    return `Verified Date (${dateAns.primaryValue}), Storage (${storageAns.storageData.usedFormatted}), Activity (${activityAns.activityData.totalEvents} actions), and Specs (${systemAns.systemData.os}, ${systemAns.systemData.cpuCores} cores)`;
   });
 
   return results;
