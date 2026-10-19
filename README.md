@@ -9,6 +9,7 @@
 **Veritas Private Semantic Engine** is an offline-capable, privacy-first personal search engine designed to run entirely in your web browser. It indexes confidential documents, notes, code snippets, financial records, and medical files directly on your machine.
 
 Unlike traditional cloud search systems and LLM integrations that transmit sensitive data to external servers, Veritas operates **100% locally**:
+
 - **Zero Telemetry**: No tracking scripts, analytics, or remote API calls. Your queries and documents never leave your device.
 - **Client-Side Vector & Lexical Hybrid Search**: Combines high-dimensional subword TF-IDF embeddings with Okapi BM25 ranking via Reciprocal Rank Fusion (RRF) for sub-10ms query execution.
 - **End-to-End Cryptography**: All stored documents, metadata, and vector representations are encrypted client-side using **AES-256-GCM** derived via **PBKDF2** (100,000 iterations of SHA-256).
@@ -20,13 +21,16 @@ Unlike traditional cloud search systems and LLM integrations that transmit sensi
 ## Key Features
 
 ### 1. Hybrid Semantic & Lexical Search
+
 - **High-Dimensional Vector Engine**: Generates subword and conceptual semantic vectors directly on `Float32Array` buffers using cosine similarity.
 - **Okapi BM25 Keyword Matching**: Fast lexical scoring ($k_1=1.5, b=0.75$) captures exact terminology, IDs, error codes, and verbatim phrases.
 - **Reciprocal Rank Fusion (RRF)**: Merges vector similarity with keyword frequency scores to deliver precise, context-aware results.
 - **Conversational Synthesis & Snippets**: Automatically extracts the most relevant passages across matching documents with highlighted evidence spans.
 
 ### 2. Real-Time Instant Answers & Local Machine Intelligence
+
 Ask everyday questions in natural language and receive rich, interactive utility cards instantly:
+
 - **Precision Time & Clock**: Current local time, UTC, epoch timestamp, timezone, and international world clocks (New York, London, Tokyo, Sydney).
 - **Date & Calendar**: Full calendar date, ISO week number, day of the year with visual progress bar, days remaining in the year, and leap year calculation.
 - **Storage Capacity**: Real-time browser storage metrics via `navigator.storage.estimate()` (used bytes, total quota, free space, percentage used, persistent storage status, and vault document/vector counts).
@@ -36,6 +40,7 @@ Ask everyday questions in natural language and receive rich, interactive utility
 - **Privacy-Preserving Web Fallback**: When local confidence is insufficient or when explicitly requested, queries external web sources with zero user tracking tokens or headers.
 
 ### 3. Encrypted Document Vault
+
 - **AES-256-GCM Encryption**: Document text, vectors, and metadata are encrypted before writing to browser `IndexedDB`.
 - **Zero-Knowledge Key Storage**: The master passphrase is never written to disk or sent across the network. Derived keys live only in ephemeral session memory.
 - **Multi-Format Ingestion**: Drag-and-drop or upload Markdown (`.md`), plain text (`.txt`), JSON (`.json`), CSV (`.csv`), HTML, logs, and code files.
@@ -43,6 +48,7 @@ Ask everyday questions in natural language and receive rich, interactive utility
 - **Sample Vault Records**: Preloaded with realistic confidential enterprise scenarios (financial audits, medical histories, cloud infrastructure runbooks).
 
 ### 4. Cryptographic Audit Trail & RBAC
+
 - **Tamper-Evident Hash Chain**: Every user action (document ingestion, decryption, query, purge, sync) is recorded with a cryptographic SHA-256 hash linked to the previous block.
 - **Chain Verification**: One-click verification scans the entire audit history to prove no logs were altered, truncated, or injected.
 - **Role-Based Access Control (RBAC)**:
@@ -51,6 +57,7 @@ Ask everyday questions in natural language and receive rich, interactive utility
   - **Guest**: Restricted query mode without access to master keys or administrative settings.
 
 ### 5. Browser Integration & Cross-Device Sync
+
 - **OpenSearch 1.1 Support**: Direct integration with Chrome, Brave, Firefox, Safari, and Edge. Add `/?q=%s` as a custom search engine to search your personal vault straight from the browser URL bar.
 - **Encrypted Sync Packages**: Export complete encrypted bundles containing documents, vectors, and audit logs.
 - **Vector Clock Conflict Resolution**: Import bundles with revision tracking to reconcile changes across offline machines without a centralized server.
@@ -60,7 +67,7 @@ Ask everyday questions in natural language and receive rich, interactive utility
 ## Technology Stack
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | **Frontend Framework** | React 19, TypeScript (ES2022, bundler module resolution) |
 | **Styling & UI** | Tailwind CSS v4, Lucide React icons, Motion animations |
 | **Local Database** | Native browser `IndexedDB` with atomic transactional wrappers |
@@ -73,7 +80,7 @@ Ask everyday questions in natural language and receive rich, interactive utility
 
 ## Project Structure
 
-```
+```table
 ├── docs/                       # Architecture specifications & design blueprints
 │   ├── APP_FLOW.md             # Key lifecycle & execution paths
 │   ├── BACKGROUND_SCHEMA.md    # IndexedDB database structure
@@ -119,9 +126,11 @@ Ask everyday questions in natural language and receive rich, interactive utility
 ## Getting Started
 
 ### Prerequisites
+
 - **Node.js** 18+ or **Bun** installed on your system.
 
 ### Installation
+
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -132,12 +141,15 @@ npm install
 ```
 
 ### Running the Development Server
+
 ```bash
 npm run dev
 ```
+
 Open your browser and navigate to `http://localhost:3000`.
 
 ### Building for Production
+
 ```bash
 # Check TypeScript types
 npm run lint
@@ -156,6 +168,7 @@ npm run preview
 Once the app is running, try typing any of the following queries into the search bar:
 
 ### 1. Local Machine & System Information
+
 - `date` or `today` or `calendar` - View full calendar date, ISO week, and year progress percentage.
 - `storage capacity` or `storage` - View browser disk space used, total quota, and vault count.
 - `what i have done` or `activity` - View recent file additions, searches, and cryptographic hash verification.
@@ -163,11 +176,13 @@ Once the app is running, try typing any of the following queries into the search
 - `time` or `world clock` - Real-time ticking clock with UTC and global timezones.
 
 ### 2. Semantic Document Queries
+
 - `"Q3 budget cloud migration"` - Finds documents referencing infrastructure costs even without exact keyword matches.
 - `"patient cardiac history"` - Locates medical case studies and clinical records.
 - `"API auth keys rotation policy"` - Retrieves security policies and runbooks.
 
 ### 3. Math & Quick Utilities
+
 - `42 * 18` or `sqrt(256)` - Built-in local math parser.
 - `define cryptography` - Quick knowledge lookup.
 
