@@ -4,7 +4,7 @@
  */
 
 import { DocumentItem, SyncPayload, UserRole } from '../types';
-import { storageEngine } from './storage';
+import { storageEngine, assertCanWrite } from './storage';
 import { encryptText, decryptText, computeSha256 } from './crypto';
 
 /**
@@ -28,29 +28,18 @@ export function generateExtensionFiles() {
     },
   };
 
-  const backgroundJs = `// Veritas Sovereign Omnibox Interceptor
-chrome.omnibox.onInputEntered.addListener((text, disposition) => {
-  const veritasSearchUrl = "${window.location.origin}/?q=" + encodeURIComponent(text);
-  
-  if (disposition === 'currentTab') {
-    chrome.tabs.update({ url: veritasSearchUrl });
-  } else {
-    chrome.tabs.create({ url: veritasSearchUrl });
-  }
+  const backgroundJs = `
+chrome.omnibox.onInputEntered.addListener((text) => {
+  const url = chrome.runtime.getURL('index.html') + '?q=' + encodeURIComponent(text);
+  chrome.tabs.create({ url });
 });
 
-// Provide instant suggestions via local cache
-chrome.omnibox.onInputChanged.addListener((text, suggest) => {
-  suggest([
-    { content: text, description: "<match>" + text + "</match> - Query Local Sovereign Index" }
-  ]);
+chrome.action.onClicked.addListener(() => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
 });
 `;
 
-  return {
-    manifestJson: JSON.stringify(manifest, null, 2),
-    backgroundJs,
-  };
+  return { manifest, backgroundJs };
 }
 
 /**
@@ -60,6 +49,7 @@ export async function exportEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<string> {
+  assertCanWrite(actorRole, 'export sync bundle');
   const docs = await storageEngine.getAllDocuments(masterKey);
   const audit = await storageEngine.getAuditLogs();
 
@@ -99,16 +89,15 @@ export async function importEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<{ importedCount: number; status: string }> {
+  assertCanWrite(actorRole, 'import sync bundle');
   const payload: SyncPayload = JSON.parse(bundleJson);
 
-  // 1. Verify Checksum
   const encryptedData = JSON.parse(payload.encryptedBlob);
   const expectedChecksum = await computeSha256(encryptedData.cipherBuffer);
   if (expectedChecksum !== payload.checksum) {
     throw new Error('Sync bundle checksum mismatch. File may be corrupted or modified in transit.');
   }
 
-  // 2. Decrypt Content
   const decryptedJson = await decryptText(encryptedData, masterKey);
   const bundle = JSON.parse(decryptedJson);
 
