@@ -23,6 +23,18 @@
 - [x] ResultCard, InstantAnswerCard, source badges
 - [x] Dark/light mode polish
 - [x] Accessibility basics
+- [x] Fix white-screen (restore App-compatible SearchView + executeSearch + semanticEngine)
 
-## Phase 3–9
+## Phase 3 — Hybrid Search & Conversational Extract
+- [x] Reciprocal Rank Fusion (RRF) + weighted hybrid scoring
+- [x] Improved extractive answer synthesis with citations + dedupe
+- [x] In-memory multi-turn session context (follow-up query expansion)
+- [x] Instant-answer path remains primary for time/storage/system/calc
+- [x] Respect enableWebFallback for anonymous web results
+
+## Phase 4–9
 - See docs/06-implementation-plan.md
+  - Phase 4: PDF + OCR ingestion
+  - Phase 5: Anonymous web fallback polish
+  - Phase 6: Browser extension + OpenSearch
+  - Phase 7–9: Tests, CI, release
