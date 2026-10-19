@@ -4,139 +4,166 @@
  */
 
 import React, { useState } from 'react';
-import { Shield, KeyRound, Check, X, Sparkles, AlertCircle } from 'lucide-react';
+import { KeyRound, X, AlertCircle } from 'lucide-react';
 import { deriveKeyFromPassphrase, generateSalt } from '../lib/crypto';
+
+export type PassphraseMode = 'unlock' | 'create';
 
 interface PassphraseModalProps {
   isOpen: boolean;
+  mode: PassphraseMode;
   onClose: () => void;
-  onUnlocked: (key: CryptoKey, salt: Uint8Array) => void;
+  onUnlocked: (key: CryptoKey, salt: Uint8Array, mode: PassphraseMode) => void;
   savedSalt?: Uint8Array | null;
 }
 
 export const PassphraseModal: React.FC<PassphraseModalProps> = ({
   isOpen,
+  mode,
   onClose,
   onUnlocked,
   savedSalt,
 }) => {
   const [passphrase, setPassphrase] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [isDeriving, setIsDeriving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleUnlock = async (e: React.FormEvent) => {
+  const isCreate = mode === 'create';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passphrase.trim()) {
-      setError('Please provide a secure master passphrase');
+      setError('Enter a passphrase');
       return;
+    }
+    if (isCreate) {
+      if (passphrase.length < 8) {
+        setError('Use at least 8 characters');
+        return;
+      }
+      if (passphrase !== confirm) {
+        setError('Passphrases do not match');
+        return;
+      }
     }
 
     try {
       setIsDeriving(true);
       setError(null);
-
-      const salt = savedSalt || generateSalt(16);
+      const salt = isCreate ? generateSalt(16) : savedSalt || generateSalt(16);
       const derivedKey = await deriveKeyFromPassphrase(passphrase, salt);
-
-      onUnlocked(derivedKey, salt);
+      onUnlocked(derivedKey, salt, mode);
+      setPassphrase('');
+      setConfirm('');
       onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to derive cryptographic key');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Key derivation failed');
     } finally {
       setIsDeriving(false);
     }
   };
 
-  const handleQuickDemoPassphrase = () => {
-    setPassphrase('veritas-sovereign-vault-2026');
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-2xl relative text-neutral-100">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="relative w-full max-w-sm rounded-lg border border-neutral-700 bg-neutral-950 p-5 shadow-xl"
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="vault-key-title"
+      >
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-200 transition-colors p-1"
+          className="absolute right-3 top-3 rounded p-1 text-neutral-500 hover:text-neutral-200"
           aria-label="Close"
         >
           <X className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-200">
+        <div className="mb-4 flex items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded border border-neutral-700 bg-neutral-900 text-neutral-300">
             <KeyRound className="w-4 h-4" />
-          </div>
+          </span>
           <div>
-            <h2 className="text-base font-semibold text-neutral-100">Unlock Sovereign Vault</h2>
-            <p className="text-xs text-neutral-400">Zero-knowledge local client-side key derivation</p>
+            <h2 id="vault-key-title" className="text-sm font-medium text-neutral-100">
+              {isCreate ? 'Create vault key' : 'Unlock vault'}
+            </h2>
+            <p className="text-xs text-neutral-500">
+              {isCreate
+                ? 'New passphrase · key stays on this device'
+                : 'Enter the passphrase for this vault'}
+            </p>
           </div>
         </div>
 
-        <p className="text-xs text-neutral-400 mb-5 leading-relaxed">
-          Your passphrase derives an AES-256-GCM encryption key using PBKDF2 (100,000 rounds of SHA-256). 
-          The key remains strictly in volatile browser RAM and is never stored or transmitted.
-        </p>
-
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="mb-3 flex items-start gap-2 rounded border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleUnlock} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-              Master Passphrase
+            <label htmlFor="vault-pass" className="mb-1 block text-xs text-neutral-400">
+              Passphrase
             </label>
             <input
+              id="vault-pass"
               type="password"
+              autoComplete={isCreate ? 'new-password' : 'current-password'}
               value={passphrase}
               onChange={e => setPassphrase(e.target.value)}
-              placeholder="Enter your private vault passphrase..."
-              className="w-full px-3.5 py-2.5 text-sm bg-neutral-950 border border-neutral-700 rounded-lg text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 transition-colors"
+              className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+              placeholder={isCreate ? 'Choose a strong passphrase' : 'Your vault passphrase'}
               autoFocus
             />
           </div>
 
-          <div className="flex items-center justify-between text-xs text-neutral-400 pt-1">
-            <button
-              type="button"
-              onClick={handleQuickDemoPassphrase}
-              className="text-neutral-400 hover:text-neutral-200 transition-colors flex items-center gap-1 underline underline-offset-2"
-            >
-              <Sparkles className="w-3 h-3" />
-              Use standard demo passphrase
-            </button>
-            <span className="font-mono text-[11px] text-neutral-400">PBKDF2 · SHA-256</span>
-          </div>
+          {isCreate && (
+            <div>
+              <label htmlFor="vault-pass-confirm" className="mb-1 block text-xs text-neutral-400">
+                Confirm
+              </label>
+              <input
+                id="vault-pass-confirm"
+                type="password"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+                placeholder="Repeat passphrase"
+              />
+            </div>
+          )}
 
-          <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-neutral-800">
+          <p className="text-[11px] leading-relaxed text-neutral-600">
+            Derived with PBKDF2 (100k) → AES-256-GCM. Never sent off this device. If you forget
+            the passphrase, encrypted data cannot be recovered.
+          </p>
+
+          <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition-colors"
+              className="rounded-md px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isDeriving}
-              className="px-4 py-2 text-xs font-semibold bg-neutral-100 hover:bg-white text-neutral-900 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              className="rounded-md bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
             >
-              {isDeriving ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin" />
-                  <span>Deriving Key...</span>
-                </>
-              ) : (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Unlock & Decrypt</span>
-                </>
-              )}
+              {isDeriving ? 'Working…' : isCreate ? 'Create key' : 'Unlock'}
             </button>
           </div>
         </form>
