@@ -29,7 +29,6 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-neutral-950/90 backdrop-blur-md border-b border-neutral-800">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-3.5">
-        {/* Zone 1: Brand Wordmark (Single line, strictly anti-slop) */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-700 flex items-center justify-center text-neutral-100 font-mono font-bold text-sm tracking-wider">
             ∇
@@ -38,13 +37,12 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onSelectTab('search')}
             className="text-left group cursor-pointer focus:outline-none"
           >
-            <span className="text-base font-bold tracking-tight text-neutral-100 group-hover:text-white transition-colors whitespace-nowrap">
-              Veritas Sovereign
+            <span className="text-base font-semibold tracking-tight text-neutral-100 group-hover:text-white transition-colors whitespace-nowrap">
+              Veritas
             </span>
           </button>
         </div>
 
-        {/* Zone 2: Navigation Links (Clean single-line text links with subtle hover underlines) */}
         <nav className="hidden md:flex items-center gap-7 text-xs font-medium text-neutral-400">
           <button
             onClick={() => onSelectTab('search')}
@@ -80,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Globe className="w-3.5 h-3.5" />
-            <span>Browser & Sync</span>
+            <span>Sync</span>
           </button>
 
           <button
@@ -92,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Shield className="w-3.5 h-3.5" />
-            <span>Audit & RBAC</span>
+            <span>Audit</span>
           </button>
 
           <button
@@ -104,11 +102,10 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Architecture & Specs</span>
+            <span>Docs</span>
           </button>
         </nav>
 
-        {/* Zone 3: 1 Primary Action */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="hidden sm:flex items-center gap-2 text-xs text-neutral-400 font-mono">
             <span className="uppercase text-[10px] tracking-wider text-neutral-400 font-semibold">{userRole}</span>
@@ -121,12 +118,10 @@ export const Header: React.FC<HeaderProps> = ({
             {isOnline ? (
               <span className="text-blue-400 text-[11px] flex items-center gap-1">
                 <Globe className="w-3 h-3 text-blue-400" />
-                Live Web Active
+                Live Web
               </span>
             ) : (
-              <span className="text-neutral-500 text-[11px]">
-                Offline
-              </span>
+              <span className="text-neutral-500 text-[11px]">Offline</span>
             )}
           </div>
 
@@ -141,12 +136,12 @@ export const Header: React.FC<HeaderProps> = ({
             {isUnlocked ? (
               <>
                 <Unlock className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Vault Unlocked</span>
+                <span>Unlocked</span>
               </>
             ) : (
               <>
                 <Lock className="w-3.5 h-3.5 text-neutral-900" />
-                <span>Unlock Vault</span>
+                <span>Unlock</span>
               </>
             )}
           </button>
