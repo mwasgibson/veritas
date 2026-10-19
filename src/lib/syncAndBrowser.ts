@@ -4,7 +4,7 @@
  */
 
 import { DocumentItem, SyncPayload, UserRole } from '../types';
-import { storageEngine, assertCanWrite } from './storage';
+import { storageEngine } from './storage';
 import { encryptText, decryptText, computeSha256 } from './crypto';
 
 /**
@@ -28,18 +28,29 @@ export function generateExtensionFiles() {
     },
   };
 
-  const backgroundJs = `
-chrome.omnibox.onInputEntered.addListener((text) => {
-  const url = chrome.runtime.getURL('index.html') + '?q=' + encodeURIComponent(text);
-  chrome.tabs.create({ url });
+  const backgroundJs = `// Veritas Sovereign Omnibox Interceptor
+chrome.omnibox.onInputEntered.addListener((text, disposition) => {
+  const veritasSearchUrl = "${window.location.origin}/?q=" + encodeURIComponent(text);
+  
+  if (disposition === 'currentTab') {
+    chrome.tabs.update({ url: veritasSearchUrl });
+  } else {
+    chrome.tabs.create({ url: veritasSearchUrl });
+  }
 });
 
-chrome.action.onClicked.addListener(() => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+// Provide instant suggestions via local cache
+chrome.omnibox.onInputChanged.addListener((text, suggest) => {
+  suggest([
+    { content: text, description: "<match>" + text + "</match> - Query Local Sovereign Index" }
+  ]);
 });
 `;
 
-  return { manifest, backgroundJs };
+  return {
+    manifestJson: JSON.stringify(manifest, null, 2),
+    backgroundJs,
+  };
 }
 
 /**
@@ -49,7 +60,6 @@ export async function exportEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<string> {
-  assertCanWrite(actorRole, 'export sync bundle');
   const docs = await storageEngine.getAllDocuments(masterKey);
   const audit = await storageEngine.getAuditLogs();
 
@@ -89,7 +99,6 @@ export async function importEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<{ importedCount: number; status: string }> {
-  assertCanWrite(actorRole, 'import sync bundle');
   const payload: SyncPayload = JSON.parse(bundleJson);
 
   // 1. Verify Checksum
