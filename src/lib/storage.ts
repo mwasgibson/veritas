@@ -10,6 +10,26 @@ import { chunkDocument } from './semanticEngine';
 const DB_NAME = 'Veritas_Private_Storage_v1';
 const DB_VERSION = 1;
 
+/** Roles that may mutate vault content (ingest, purge, sync). */
+const WRITE_ROLES: UserRole[] = ['owner'];
+/** Roles that may change settings or re-key. */
+const ADMIN_ROLES: UserRole[] = ['owner'];
+
+/**
+ * Enforce RBAC at the storage boundary. UI checks are not sufficient.
+ */
+export function assertCanWrite(role: UserRole, action = 'write'): void {
+  if (!WRITE_ROLES.includes(role)) {
+    throw new Error(`RBAC: role "${role}" is not permitted to ${action}`);
+  }
+}
+
+export function assertCanAdmin(role: UserRole, action = 'admin'): void {
+  if (!ADMIN_ROLES.includes(role)) {
+    throw new Error(`RBAC: role "${role}" is not permitted to ${action}`);
+  }
+}
+
 /**
  * Native IndexedDB Wrapper for Veritas Sovereign Engine
  */
@@ -26,24 +46,20 @@ export class StorageEngine {
       request.onupgradeneeded = event => {
         const db = (event.target as IDBOpenDBRequest).result;
 
-        // Documents Store
         if (!db.objectStoreNames.contains('documents')) {
           db.createObjectStore('documents', { keyPath: 'id' });
         }
 
-        // Vectors Store
         if (!db.objectStoreNames.contains('vectors')) {
           const vectorStore = db.createObjectStore('vectors', { autoIncrement: true });
           vectorStore.createIndex('docId', 'docId', { unique: false });
         }
 
-        // Audit Logs Store
         if (!db.objectStoreNames.contains('audit_logs')) {
           const auditStore = db.createObjectStore('audit_logs', { keyPath: 'id' });
           auditStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
 
-        // Settings Store
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
         }
@@ -68,9 +84,6 @@ export class StorageEngine {
     }
   }
 
-  /**
-   * Record a tamper-evident audit log entry
-   */
   async recordAudit(
     action: AuditLogEntry['action'],
     actorRole: UserRole,
@@ -103,9 +116,6 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Save a document, chunk it, generate vector embeddings, and encrypt if masterKey is supplied
-   */
   async saveDocument(
     doc: {
       id?: string;
@@ -120,16 +130,21 @@ export class StorageEngine {
     masterKey?: CryptoKey | null,
     actorRole: UserRole = 'owner'
   ): Promise<DocumentItem> {
+    assertCanWrite(actorRole, 'ingest documents');
     await this.init();
+
+    if (!masterKey) {
+      throw new Error(
+        'Vault is locked or no master key is available. Unlock with your passphrase before ingesting.'
+      );
+    }
+
     const id = doc.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const now = Date.now();
     const tags = doc.tags || [];
     const tokensCount = doc.content.split(/\s+/).length;
 
-    let encryptedPayload = undefined;
-    if (masterKey) {
-      encryptedPayload = await encryptText(doc.content, masterKey);
-    }
+    const encryptedPayload = await encryptText(doc.content, masterKey);
 
     const documentItem: DocumentItem = {
       id,
@@ -147,36 +162,28 @@ export class StorageEngine {
       version: 1,
     };
 
-    // 1. Save document item
     await new Promise<void>((resolve, reject) => {
       if (!this.db) return reject(new Error('DB not initialized'));
       const tx = this.db.transaction('documents', 'readwrite');
       const store = tx.objectStore('documents');
-      // Store on disk without plaintext content if encrypted
-      const recordToStore = encryptedPayload
-        ? { ...documentItem, content: '' }
-        : documentItem;
+      const recordToStore = { ...documentItem, content: '' };
       const req = store.put(recordToStore);
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
 
-    // 2. Index vectors
-    const chunks = chunkDocument(id, doc.content);
+    const chunks = chunkDocument(id, doc.content, 300, 50, true);
     await new Promise<void>((resolve, reject) => {
       if (!this.db) return reject(new Error('DB not initialized'));
       const tx = this.db.transaction('vectors', 'readwrite');
       const store = tx.objectStore('vectors');
 
-      // Remove existing vectors for this docId first
       const index = store.index('docId');
       const keyReq = index.getAllKeys(id);
       keyReq.onsuccess = () => {
-        const keys = keyReq.result;
-        for (const k of keys) {
+        for (const k of keyReq.result) {
           store.delete(k);
         }
-        // Add new chunks
         for (const chunk of chunks) {
           store.add(chunk);
         }
@@ -188,15 +195,12 @@ export class StorageEngine {
     await this.recordAudit(
       'INGEST',
       actorRole,
-      `Indexed document "${doc.title}" (${tokensCount} tokens, ${chunks.length} vector chunks)`
+      `Indexed document "${doc.title}" (${tokensCount} tokens, ${chunks.length} vector chunks, encrypted)`
     );
 
     return documentItem;
   }
 
-  /**
-   * Fetch all documents. If masterKey is provided, decrypts content.
-   */
   async getAllDocuments(masterKey?: CryptoKey | null): Promise<DocumentItem[]> {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -230,9 +234,6 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Fetch all vector chunks for similarity comparisons
-   */
   async getAllVectors(): Promise<VectorChunk[]> {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -245,10 +246,8 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Delete a document and its associated vector chunks
-   */
   async deleteDocument(id: string, actorRole: UserRole = 'owner'): Promise<void> {
+    assertCanWrite(actorRole, 'delete documents');
     await this.init();
     return new Promise((resolve, reject) => {
       if (!this.db) return reject(new Error('DB not initialized'));
@@ -274,10 +273,8 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Clear all documents and vectors
-   */
   async clearAll(actorRole: UserRole = 'owner'): Promise<void> {
+    assertCanWrite(actorRole, 'wipe vault');
     await this.init();
     return new Promise((resolve, reject) => {
       if (!this.db) return reject(new Error('DB not initialized'));
@@ -292,10 +289,8 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Automatically purge legacy mock/demo documents that do not belong to a real machine file
-   */
   async purgeLegacyMockData(actorRole: UserRole = 'owner'): Promise<number> {
+    assertCanWrite(actorRole, 'purge legacy data');
     await this.init();
     const docs = await this.getAllDocuments(null);
     let purgedCount = 0;
@@ -309,7 +304,7 @@ export class StorageEngine {
         doc.title.includes('Lease Agreement') ||
         doc.title.includes('Vacation Itinerary') ||
         doc.title.includes('Distributed Systems') ||
-        doc.title.includes('Cryptographic Key Derivation & E2EE') ||
+        doc.title.includes('Cryptographic Key Derivation') ||
         doc.title.includes('Unit Test Document Ingestion');
 
       if (isLegacyMock) {
@@ -318,7 +313,6 @@ export class StorageEngine {
       }
     }
 
-    // Also remove old database if it exists in browser profile
     if (typeof indexedDB !== 'undefined' && 'databases' in indexedDB) {
       try {
         const dbs = await indexedDB.databases();
@@ -335,9 +329,6 @@ export class StorageEngine {
     return purgedCount;
   }
 
-  /**
-   * Retrieve all audit log entries
-   */
   async getAuditLogs(): Promise<AuditLogEntry[]> {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -350,9 +341,6 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Retrieve a setting value from IndexedDB
-   */
   async getSetting<T>(key: string): Promise<T | null> {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -367,9 +355,6 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Persist a setting value in IndexedDB
-   */
   async setSetting(key: string, value: any): Promise<void> {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -384,4 +369,3 @@ export class StorageEngine {
 }
 
 export const storageEngine = new StorageEngine();
-
