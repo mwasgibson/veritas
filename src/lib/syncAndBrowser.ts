@@ -4,7 +4,7 @@
  */
 
 import { DocumentItem, SyncPayload, UserRole } from '../types';
-import { storageEngine } from './storage';
+import { storageEngine, assertCanWrite } from './storage';
 import { encryptText, decryptText, computeSha256 } from './crypto';
 
 /**
@@ -28,29 +28,18 @@ export function generateExtensionFiles() {
     },
   };
 
-  const backgroundJs = `// Veritas Sovereign Omnibox Interceptor
-chrome.omnibox.onInputEntered.addListener((text, disposition) => {
-  const veritasSearchUrl = "${window.location.origin}/?q=" + encodeURIComponent(text);
-  
-  if (disposition === 'currentTab') {
-    chrome.tabs.update({ url: veritasSearchUrl });
-  } else {
-    chrome.tabs.create({ url: veritasSearchUrl });
-  }
+  const backgroundJs = `
+chrome.omnibox.onInputEntered.addListener((text) => {
+  const url = chrome.runtime.getURL('index.html') + '?q=' + encodeURIComponent(text);
+  chrome.tabs.create({ url });
 });
 
-// Provide instant suggestions via local cache
-chrome.omnibox.onInputChanged.addListener((text, suggest) => {
-  suggest([
-    { content: text, description: "<match>" + text + "</match> - Query Local Sovereign Index" }
-  ]);
+chrome.action.onClicked.addListener(() => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
 });
 `;
 
-  return {
-    manifestJson: JSON.stringify(manifest, null, 2),
-    backgroundJs,
-  };
+  return { manifest, backgroundJs };
 }
 
 /**
@@ -60,6 +49,7 @@ export async function exportEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<string> {
+  assertCanWrite(actorRole, 'export sync bundle');
   const docs = await storageEngine.getAllDocuments(masterKey);
   const audit = await storageEngine.getAuditLogs();
 
@@ -79,13 +69,13 @@ export async function exportEncryptedSyncBundle(
     exportedAt: Date.now(),
     encryptedBlob: JSON.stringify(encrypted),
     checksum,
-    deviceFingerprint: `device_${Math.random().toString(36).substring(2, 8)}`,
+    deviceFingerprint: \`device_\${Math.random().toString(36).substring(2, 8)}\`,
   };
 
   await storageEngine.recordAudit(
     'EXPORT',
     actorRole,
-    `Exported encrypted sync payload with ${docs.length} documents (SHA-256: ${checksum.slice(0, 8)}...)`
+    \`Exported encrypted sync payload with \${docs.length} documents (SHA-256: \${checksum.slice(0, 8)}...)\`
   );
 
   return JSON.stringify(payload, null, 2);
@@ -99,6 +89,7 @@ export async function importEncryptedSyncBundle(
   masterKey: CryptoKey,
   actorRole: UserRole = 'owner'
 ): Promise<{ importedCount: number; status: string }> {
+  assertCanWrite(actorRole, 'import sync bundle');
   const payload: SyncPayload = JSON.parse(bundleJson);
 
   // 1. Verify Checksum
@@ -133,7 +124,7 @@ export async function importEncryptedSyncBundle(
   await storageEngine.recordAudit(
     'SYNC',
     actorRole,
-    `Successfully merged ${importedCount} documents from encrypted sync payload`
+    \`Successfully merged \${importedCount} documents from encrypted sync payload\`
   );
 
   return {
