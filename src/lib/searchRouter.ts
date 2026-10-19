@@ -15,6 +15,7 @@ import {
 } from './semanticEngine';
 import { fuseHybridScores } from './rankFusion';
 import { searchSession } from './sessionContext';
+import { fetchAndRerankWeb } from './webFallback';
 
 export interface SearchExecutionResult {
   query: string;
@@ -197,13 +198,20 @@ export async function executeSearch(
     }
   }
 
+  // Dual-layer anonymous web fallback (Phase 5): only when local confidence is low
   const webResults: SearchResultItem[] = [];
-  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const topLocalScore = localResults[0]?.hybridScore ?? 0;
 
-  if (isOnline && settings.enableWebFallback) {
+  if (settings.enableWebFallback) {
     try {
-      const externalMatches = await fetchAnonymousWebResults(trimmed);
-      webResults.push(...externalMatches);
+      const web = await fetchAndRerankWeb(trimmed, {
+        topLocalScore,
+        minLocalConfidenceThreshold: settings.minLocalConfidenceThreshold,
+        fetchPageExcerpts: false,
+      });
+      if (web.usedWeb) {
+        webResults.push(...web.results);
+      }
     } catch (err) {
       console.warn('Anonymous web query exception:', err);
     }
@@ -251,62 +259,4 @@ function formatInstantAsAnswer(w: InstantWidget): string {
     default:
       return w.primaryValue;
   }
-}
-
-async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem[]> {
-  const sanitizedQuery = encodeURIComponent(query.replace(/[^\w\s-]/gi, '').trim());
-  if (!sanitizedQuery) return [];
-
-  const url = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${sanitizedQuery}&limit=8&namespace=0&format=json&origin=*`;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    });
-  } catch {
-    clearTimeout(timeoutId);
-    return [];
-  }
-  clearTimeout(timeoutId);
-
-  if (!response.ok) return [];
-
-  const data = await response.json();
-  const titles = data[1] || [];
-  const descriptions = data[2] || [];
-  const urls = data[3] || [];
-  const queryTerms = tokenize(query);
-  const results: SearchResultItem[] = [];
-
-  for (let i = 0; i < titles.length; i++) {
-    const title = titles[i];
-    const desc = descriptions[i] || `Web result for "${title}"`;
-    const webUrl = urls[i] || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
-    const snippetTokens = tokenize(title + ' ' + desc);
-    const overlap = queryTerms.filter(t => snippetTokens.includes(t)).length;
-    const matchScore = Math.max(0.35, Math.min(0.9, overlap / Math.max(1, queryTerms.length)));
-
-    results.push({
-      docId: `web_${i}_${Date.now()}`,
-      title,
-      category: 'web',
-      snippet: desc,
-      highlightWords: queryTerms,
-      vectorScore: matchScore,
-      bm25Score: matchScore,
-      hybridScore: Math.round(matchScore * 100) / 100,
-      latencyMs: 140,
-      source: 'web',
-      encrypted: false,
-      sourceUrl: webUrl,
-    });
-  }
-
-  return results;
 }
