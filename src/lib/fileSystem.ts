@@ -5,46 +5,32 @@
 
 import { DocumentItem, ConnectedFolder, UserRole } from '../types';
 import { storageEngine } from './storage';
+import {
+  extractFromFile,
+  isSupportedIngestExtension,
+  extensionOf,
+  MAX_EXTRACT_BYTES,
+} from './extractors';
 
+/** @deprecated Use isSupportedIngestExtension — kept for callers that import the set */
 export const SUPPORTED_EXTENSIONS = new Set([
-  'txt',
-  'md',
-  'markdown',
-  'json',
-  'csv',
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'py',
-  'html',
-  'css',
-  'yaml',
-  'yml',
-  'env',
-  'log',
-  'rtf',
-  'org',
-  'sh',
-  'sql',
-  'toml',
-  'conf',
+  'txt', 'md', 'markdown', 'json', 'csv', 'ts', 'tsx', 'js', 'jsx', 'py',
+  'html', 'css', 'yaml', 'yml', 'env', 'log', 'rtf', 'org', 'sh', 'sql',
+  'toml', 'conf', 'xml', 'svg', 'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp',
 ]);
 
 export interface IndexProgress {
   scannedCount: number;
   indexedCount: number;
+  failedCount: number;
   currentFile: string;
   isComplete: boolean;
   error?: string;
+  recentWarnings?: string[];
 }
 
-/**
- * Infer category from filename and content
- */
 function inferCategory(filename: string, content: string): DocumentItem['category'] {
   const lower = (filename + ' ' + content.slice(0, 500)).toLowerCase();
-
   if (/tax|deduct|invoice|revenue|receipt|w2|1099|balance|salary|expense|financial|bank|crypto|ledger/i.test(lower)) {
     return 'finance';
   }
@@ -60,90 +46,130 @@ function inferCategory(filename: string, content: string): DocumentItem['categor
   if (/flight|hotel|trip|travel|itinerary|passport|packing|vacation|airbnb|destination/i.test(lower)) {
     return 'personal';
   }
-
   return 'notes';
 }
 
-/**
- * Check if the browser supports the native File System Access API
- */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function indexOneFile(
+  file: File,
+  filePath: string,
+  masterKey: CryptoKey | null | undefined,
+  actorRole: UserRole
+): Promise<{ ok: boolean; warning?: string }> {
+  const extension = extensionOf(file.name);
+  if (!isSupportedIngestExtension(extension)) {
+    return { ok: false, warning: `skip unsupported .${extension}` };
+  }
+  if (file.size > MAX_EXTRACT_BYTES) {
+    return { ok: false, warning: `skip oversized ${file.name}` };
+  }
+
+  const extracted = await extractFromFile(file);
+  if (!extracted.text.trim()) {
+    return { ok: false, warning: extracted.warning || `no text in ${file.name}` };
+  }
+
+  const category = inferCategory(file.name, extracted.text);
+  const title = file.name.replace(/\.[^/.]+$/, '');
+  const tags = [extension, category, extracted.kind];
+  if (extracted.partial) tags.push('partial-extract');
+
+  await storageEngine.saveDocument(
+    {
+      id: `file_${filePath.replace(/[^a-zA-Z0-9_-]/g, '_')}`.slice(0, 180),
+      title,
+      category,
+      content: extracted.text,
+      filePath,
+      fileSize: file.size,
+      fileExtension: extension,
+      tags,
+    },
+    masterKey,
+    actorRole
+  );
+
+  return { ok: true, warning: extracted.warning };
+}
+
 export function isFileSystemAccessSupported(): boolean {
   return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 }
 
-/**
- * Request access to machine's local directory via OS File Explorer
- */
 export async function connectMachineDirectory(
   onProgress: (p: IndexProgress) => void,
   masterKey?: CryptoKey | null,
   actorRole: UserRole = 'owner'
 ): Promise<ConnectedFolder | null> {
   if (!isFileSystemAccessSupported()) {
-    throw new Error('Your browser does not support the native showDirectoryPicker API. Use the folder upload fallback.');
+    throw new Error(
+      'Your browser does not support showDirectoryPicker. Use the folder upload fallback.'
+    );
   }
 
   try {
-    // Opens native OS File Explorer (Windows Explorer, macOS Finder, Linux File Manager)
     const dirHandle = await (window as any).showDirectoryPicker({
       id: 'veritas-search-vault',
       mode: 'read',
     });
 
-    const folderName = dirHandle.name;
+    const folderName = dirHandle.name as string;
     let scanned = 0;
     let indexed = 0;
+    let failed = 0;
+    const recentWarnings: string[] = [];
 
-    // Helper to recursively walk directories
+    const pushWarn = (w?: string) => {
+      if (!w) return;
+      recentWarnings.push(w);
+      if (recentWarnings.length > 5) recentWarnings.shift();
+    };
+
     async function scanDirectory(handle: any, currentPath = '') {
       for await (const entry of handle.values()) {
         if (entry.kind === 'file') {
           scanned++;
-          const fileName = entry.name;
-          const extension = fileName.split('.').pop()?.toLowerCase() || '';
+          const fileName = entry.name as string;
+          const extension = extensionOf(fileName);
+          if (!isSupportedIngestExtension(extension)) continue;
 
-          if (SUPPORTED_EXTENSIONS.has(extension)) {
-            onProgress({
-              scannedCount: scanned,
-              indexedCount: indexed,
-              currentFile: `${currentPath}/${fileName}`,
-              isComplete: false,
-            });
+          onProgress({
+            scannedCount: scanned,
+            indexedCount: indexed,
+            failedCount: failed,
+            currentFile: `${currentPath}/${fileName}`.replace(/^\//, ''),
+            isComplete: false,
+            recentWarnings: [...recentWarnings],
+          });
 
-            try {
-              const file = await entry.getFile();
-              // Skip very large files (> 5MB)
-              if (file.size <= 5 * 1024 * 1024) {
-                const text = await file.text();
-                if (text.trim().length > 0) {
-                  const category = inferCategory(fileName, text);
-                  const title = fileName.replace(/\.[^/.]+$/, '');
-                  const filePath = `${folderName}${currentPath}/${fileName}`;
-
-                  await storageEngine.saveDocument(
-                    {
-                      id: `file_${filePath.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
-                      title,
-                      category,
-                      content: text,
-                      filePath,
-                      fileSize: file.size,
-                      fileExtension: extension,
-                      tags: [extension, category],
-                    },
-                    masterKey,
-                    actorRole
-                  );
-                  indexed++;
-                }
-              }
-            } catch (fileErr) {
-              console.warn(`Could not read file ${fileName}:`, fileErr);
+          try {
+            const file = (await entry.getFile()) as File;
+            const filePath = `${folderName}${currentPath}/${fileName}`;
+            const result = await indexOneFile(file, filePath, masterKey, actorRole);
+            if (result.ok) {
+              indexed++;
+              if (result.warning) pushWarn(`${fileName}: ${result.warning}`);
+            } else {
+              failed++;
+              pushWarn(`${fileName}: ${result.warning || 'failed'}`);
             }
+          } catch (fileErr) {
+            failed++;
+            pushWarn(`${fileName}: ${fileErr instanceof Error ? fileErr.message : 'read error'}`);
+            console.warn(`Could not read file ${fileName}:`, fileErr);
           }
+
+          if (scanned % 3 === 0) await yieldToMain();
         } else if (entry.kind === 'directory') {
-          // Avoid scanning hidden or package directories
-          if (!entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== 'build') {
+          if (
+            !entry.name.startsWith('.') &&
+            entry.name !== 'node_modules' &&
+            entry.name !== 'dist' &&
+            entry.name !== 'build'
+          ) {
             await scanDirectory(entry, `${currentPath}/${entry.name}`);
           }
         }
@@ -162,29 +188,25 @@ export async function connectMachineDirectory(
     await storageEngine.recordAudit(
       'INGEST',
       actorRole,
-      `Connected machine folder "${folderName}" and indexed ${indexed} local files into vector storage`
+      `Connected folder "${folderName}" — indexed ${indexed}, failed ${failed}, scanned ${scanned}`
     );
 
     onProgress({
       scannedCount: scanned,
       indexedCount: indexed,
+      failedCount: failed,
       currentFile: 'Complete',
       isComplete: true,
+      recentWarnings: [...recentWarnings],
     });
 
     return folderInfo;
   } catch (err: any) {
-    if (err.name === 'AbortError') {
-      // User canceled file explorer picker
-      return null;
-    }
+    if (err?.name === 'AbortError') return null;
     throw err;
   }
 }
 
-/**
- * Fallback: Process files selected via standard webkitdirectory folder input
- */
 export async function processSelectedFolderFiles(
   fileList: FileList,
   folderName: string,
@@ -194,53 +216,52 @@ export async function processSelectedFolderFiles(
 ): Promise<ConnectedFolder> {
   let scanned = 0;
   let indexed = 0;
+  let failed = 0;
+  const recentWarnings: string[] = [];
+
+  const pushWarn = (w?: string) => {
+    if (!w) return;
+    recentWarnings.push(w);
+    if (recentWarnings.length > 5) recentWarnings.shift();
+  };
 
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
     scanned++;
     const path = (file as any).webkitRelativePath || file.name;
-    const fileName = file.name;
-    const extension = fileName.split('.').pop()?.toLowerCase() || '';
 
-    // Ignore hidden or dependency files
     if (path.includes('/.') || path.includes('/node_modules/') || path.includes('/dist/')) {
       continue;
     }
 
-    if (SUPPORTED_EXTENSIONS.has(extension) && file.size <= 5 * 1024 * 1024) {
-      onProgress({
-        scannedCount: scanned,
-        indexedCount: indexed,
-        currentFile: path,
-        isComplete: false,
-      });
+    const extension = extensionOf(file.name);
+    if (!isSupportedIngestExtension(extension)) continue;
 
-      try {
-        const text = await file.text();
-        if (text.trim().length > 0) {
-          const category = inferCategory(fileName, text);
-          const title = fileName.replace(/\.[^/.]+$/, '');
+    onProgress({
+      scannedCount: scanned,
+      indexedCount: indexed,
+      failedCount: failed,
+      currentFile: path,
+      isComplete: false,
+      recentWarnings: [...recentWarnings],
+    });
 
-          await storageEngine.saveDocument(
-            {
-              id: `file_${path.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
-              title,
-              category,
-              content: text,
-              filePath: path,
-              fileSize: file.size,
-              fileExtension: extension,
-              tags: [extension, category],
-            },
-            masterKey,
-            actorRole
-          );
-          indexed++;
-        }
-      } catch (err) {
-        console.warn('Failed reading file:', path, err);
+    try {
+      const result = await indexOneFile(file, path, masterKey, actorRole);
+      if (result.ok) {
+        indexed++;
+        if (result.warning) pushWarn(`${file.name}: ${result.warning}`);
+      } else {
+        failed++;
+        pushWarn(`${file.name}: ${result.warning || 'failed'}`);
       }
+    } catch (err) {
+      failed++;
+      pushWarn(`${file.name}: read error`);
+      console.warn('Failed reading file:', path, err);
     }
+
+    if (scanned % 3 === 0) await yieldToMain();
   }
 
   const folderInfo: ConnectedFolder = {
@@ -253,15 +274,26 @@ export async function processSelectedFolderFiles(
   await storageEngine.recordAudit(
     'INGEST',
     actorRole,
-    `Imported folder "${folderInfo.name}" (${indexed} files indexed into vector space)`
+    `Imported folder "${folderInfo.name}" — indexed ${indexed}, failed ${failed}`
   );
 
   onProgress({
     scannedCount: scanned,
     indexedCount: indexed,
+    failedCount: failed,
     currentFile: 'Complete',
     isComplete: true,
+    recentWarnings: [...recentWarnings],
   });
 
   return folderInfo;
+}
+
+/** Index a single user-picked file (e.g. one PDF) into the vault. */
+export async function ingestSingleFile(
+  file: File,
+  masterKey?: CryptoKey | null,
+  actorRole: UserRole = 'owner'
+): Promise<{ ok: boolean; warning?: string }> {
+  return indexOneFile(file, file.name, masterKey, actorRole);
 }
