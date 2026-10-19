@@ -12,10 +12,14 @@ import {
   computeBM25,
   tokenize,
   synthesizeLocalAnswer,
+  fuseHybridScores,
 } from './semanticEngine';
+import { searchSession } from './sessionContext';
 
 export interface SearchExecutionResult {
   query: string;
+  expandedQuery?: string;
+  usedSessionContext?: boolean;
   results: SearchResultItem[];
   instantWidget?: InstantWidget;
   conversationalAnswer?: ConversationalAnswer;
@@ -25,13 +29,15 @@ export interface SearchExecutionResult {
 }
 
 /**
- * Execute Dual-Layer Search: Local Semantic Index First + Anonymous Fallback
+ * Dual-layer search: local hybrid (vector + BM25 + RRF) first, anonymous web fallback.
+ * Optional session context expands follow-up queries in-memory only.
  */
 export async function executeSearch(
   query: string,
   settings: SearchSettings,
   masterKey?: CryptoKey | null,
-  actorRole: UserRole = 'owner'
+  actorRole: UserRole = 'owner',
+  options?: { useSessionContext?: boolean }
 ): Promise<SearchExecutionResult> {
   const startTime = performance.now();
   const trimmed = query.trim();
@@ -46,12 +52,18 @@ export async function executeSearch(
     };
   }
 
+  const useSession = options?.useSessionContext !== false;
+  const { expanded, usedContext } = useSession
+    ? searchSession.expandQuery(trimmed)
+    : { expanded: trimmed, usedContext: false };
+  const searchText = expanded;
+
   const instantWidget = await resolveInstantAnswer(trimmed);
 
   await storageEngine.recordAudit(
     'QUERY',
     actorRole,
-    `Executed search: "${trimmed.slice(0, 50)}${trimmed.length > 50 ? '...' : ''}" [Mode: ${settings.searchMode}]`
+    `Executed search: "${trimmed.slice(0, 50)}${trimmed.length > 50 ? '...' : ''}" [Mode: ${settings.searchMode}]${usedContext ? ' [session]' : ''}`
   );
 
   const [docs, vectorChunks] = await Promise.all([
@@ -59,8 +71,8 @@ export async function executeSearch(
     storageEngine.getAllVectors(),
   ]);
 
-  const queryTokens = tokenize(trimmed);
-  const queryVector = generateVector(trimmed);
+  const queryTokens = tokenize(searchText);
+  const queryVector = generateVector(searchText);
   const docMap = new Map(docs.map(d => [d.id, d]));
 
   const docChunkScores = new Map<
@@ -80,47 +92,69 @@ export async function executeSearch(
       docChunkScores.set(chunk.docId, {
         bestVectorSim: sim,
         bestSnippet: liveSnippet,
-        keywords: chunk.keywords,
+        keywords: chunk.keywords || [],
       });
     }
   }
 
-  const localResults: SearchResultItem[] = [];
+  const vectorById = new Map<string, number>();
+  const bm25ById = new Map<string, number>();
+  const metaById = new Map<
+    string,
+    { title: string; category: string; tokens: string[]; keywords: string[]; snippet: string }
+  >();
 
   for (const doc of docs) {
     const chunkInfo = docChunkScores.get(doc.id) || {
       bestVectorSim: 0,
       bestSnippet: doc.content ? doc.content.slice(0, 300) : '',
-      keywords: [],
+      keywords: [] as string[],
     };
-
-    const docTokens = tokenize(doc.title + ' ' + (doc.content || '') + ' ' + (doc.tags || []).join(' '));
-    const bm25 = computeBM25(queryTokens, docTokens);
-
-    let hybridScore = 0;
-    if (settings.searchMode === 'semantic') {
-      hybridScore = chunkInfo.bestVectorSim;
-    } else if (settings.searchMode === 'exact') {
-      hybridScore = bm25;
-    } else {
-      const alpha = settings.hybridWeight;
-      hybridScore = alpha * chunkInfo.bestVectorSim + (1 - alpha) * bm25;
-    }
-
-    const highlightWords = queryTokens.filter(
-      t => docTokens.includes(t) || doc.title.toLowerCase().includes(t)
+    const docTokens = tokenize(
+      doc.title + ' ' + (doc.content || '') + ' ' + (doc.tags || []).join(' ')
     );
+    const bm25 = computeBM25(queryTokens, docTokens);
+    vectorById.set(doc.id, chunkInfo.bestVectorSim);
+    bm25ById.set(doc.id, bm25);
+    metaById.set(doc.id, {
+      title: doc.title,
+      category: doc.category,
+      tokens: docTokens,
+      keywords: chunkInfo.keywords,
+      snippet: chunkInfo.bestSnippet,
+    });
+  }
 
-    if (hybridScore >= settings.minLocalConfidenceThreshold || bm25 > 0.25) {
+  const docIds = docs.map(d => d.id);
+  const hybridById = fuseHybridScores(
+    docIds,
+    vectorById,
+    bm25ById,
+    settings.searchMode,
+    settings.hybridWeight
+  );
+
+  const localResults: SearchResultItem[] = [];
+
+  for (const doc of docs) {
+    const hybridScore = hybridById.get(doc.id) || 0;
+    const v = vectorById.get(doc.id) || 0;
+    const bm25 = bm25ById.get(doc.id) || 0;
+    const meta = metaById.get(doc.id)!;
+
+    if (hybridScore >= settings.minLocalConfidenceThreshold || bm25 > 0.25 || v > 0.55) {
+      const highlightWords = queryTokens.filter(
+        t => meta.tokens.includes(t) || meta.title.toLowerCase().includes(t)
+      );
       localResults.push({
         docId: doc.id,
         title: doc.title,
         category: doc.category,
         snippet:
-          chunkInfo.bestSnippet ||
+          meta.snippet ||
           (doc.content ? doc.content.slice(0, 280) + '...' : 'Encrypted document'),
         highlightWords,
-        vectorScore: Math.round(chunkInfo.bestVectorSim * 100) / 100,
+        vectorScore: Math.round(v * 100) / 100,
         bm25Score: Math.round(bm25 * 100) / 100,
         hybridScore: Math.round(hybridScore * 100) / 100,
         latencyMs: 0,
@@ -134,14 +168,14 @@ export async function executeSearch(
 
   localResults.sort((a, b) => b.hybridScore - a.hybridScore);
 
-  let conversationalAnswer: ConversationalAnswer | undefined = undefined;
+  let conversationalAnswer: ConversationalAnswer | undefined;
   const isConversationalQuery =
     settings.searchMode === 'conversational' ||
     trimmed.endsWith('?') ||
-    /^(what|how|where|when|why|who|can|is|does|tell|show)\b/i.test(trimmed);
+    /^(what|how|where|when|why|who|can|is|does|tell|show|explain|summarize)\b/i.test(trimmed);
 
   if (isConversationalQuery) {
-    const matchingDocItems = localResults.map(r => {
+    const matchingDocItems = localResults.slice(0, 8).map(r => {
       const doc = docMap.get(r.docId);
       return {
         id: r.docId,
@@ -152,26 +186,11 @@ export async function executeSearch(
     });
 
     if (matchingDocItems.length > 0) {
-      conversationalAnswer = synthesizeLocalAnswer(trimmed, matchingDocItems);
+      conversationalAnswer = synthesizeLocalAnswer(searchText, matchingDocItems);
     } else if (instantWidget) {
-      const answerText =
-        instantWidget.type === 'time'
-          ? `The current ${instantWidget.title.toLowerCase()} is ${instantWidget.primaryValue} (${instantWidget.secondaryValue || ''}). ${instantWidget.details || ''}`
-          : instantWidget.type === 'date'
-            ? `Today's date is ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
-            : instantWidget.type === 'storage'
-              ? `Local machine storage status: ${instantWidget.primaryValue} (${instantWidget.secondaryValue || ''}). ${instantWidget.details || ''}`
-              : instantWidget.type === 'system'
-                ? `Your machine specifications: ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
-                : instantWidget.type === 'activity'
-                  ? `Your machine activity history: ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
-                  : instantWidget.type === 'calculator'
-                    ? `Calculation: ${instantWidget.secondaryValue || instantWidget.primaryValue}`
-                    : instantWidget.primaryValue;
-
       conversationalAnswer = {
         query: trimmed,
-        synthesizedAnswer: answerText,
+        synthesizedAnswer: formatInstantAsAnswer(instantWidget),
         citations: [],
         confidence: 1.0,
       };
@@ -192,13 +211,20 @@ export async function executeSearch(
 
   const endTime = performance.now();
   const totalTimeMs = Math.round((endTime - startTime) * 10) / 10;
+  for (const r of localResults) r.latencyMs = totalTimeMs;
 
-  for (const r of localResults) {
-    r.latencyMs = totalTimeMs;
+  if (useSession) {
+    const titles = localResults.slice(0, 5).map(r => r.title);
+    const keywords = Array.from(
+      new Set(localResults.flatMap(r => r.highlightWords).slice(0, 12))
+    );
+    searchSession.pushTurn(trimmed, titles, keywords);
   }
 
   return {
     query: trimmed,
+    expandedQuery: usedContext ? searchText : undefined,
+    usedSessionContext: usedContext,
     results: [...localResults, ...webResults],
     instantWidget: instantWidget || undefined,
     conversationalAnswer,
@@ -206,6 +232,25 @@ export async function executeSearch(
     localResultsCount: localResults.length,
     webResultsCount: webResults.length,
   };
+}
+
+function formatInstantAsAnswer(w: InstantWidget): string {
+  switch (w.type) {
+    case 'time':
+      return `The current ${w.title.toLowerCase()} is ${w.primaryValue}${w.secondaryValue ? ` (${w.secondaryValue})` : ''}. ${w.details || ''}`.trim();
+    case 'date':
+      return `Today's date is ${w.primaryValue}. ${w.secondaryValue || ''} ${w.details || ''}`.trim();
+    case 'storage':
+      return `Local storage: ${w.primaryValue}${w.secondaryValue ? ` (${w.secondaryValue})` : ''}. ${w.details || ''}`.trim();
+    case 'system':
+      return `Machine: ${w.primaryValue}. ${w.secondaryValue || ''} ${w.details || ''}`.trim();
+    case 'activity':
+      return `Activity: ${w.primaryValue}. ${w.secondaryValue || ''} ${w.details || ''}`.trim();
+    case 'calculator':
+      return `Calculation: ${w.secondaryValue || w.primaryValue}`;
+    default:
+      return w.primaryValue;
+  }
 }
 
 async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem[]> {
@@ -236,18 +281,16 @@ async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem
   const titles = data[1] || [];
   const descriptions = data[2] || [];
   const urls = data[3] || [];
-
   const queryTerms = tokenize(query);
   const results: SearchResultItem[] = [];
 
   for (let i = 0; i < titles.length; i++) {
     const title = titles[i];
-    const desc = descriptions[i] || `Live web search result for "${title}"`;
+    const desc = descriptions[i] || `Web result for "${title}"`;
     const webUrl = urls[i] || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
-
     const snippetTokens = tokenize(title + ' ' + desc);
     const overlap = queryTerms.filter(t => snippetTokens.includes(t)).length;
-    const matchScore = Math.max(0.4, Math.min(0.95, overlap / Math.max(1, queryTerms.length)));
+    const matchScore = Math.max(0.35, Math.min(0.9, overlap / Math.max(1, queryTerms.length)));
 
     results.push({
       docId: `web_${i}_${Date.now()}`,
