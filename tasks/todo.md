@@ -32,9 +32,16 @@
 - [x] Instant-answer path remains primary for time/storage/system/calc
 - [x] Respect enableWebFallback for anonymous web results
 
-## Phase 4–9
+## Phase 4 — Ingestion Expansion
+- [x] Client-side extractors (text / PDF / image)
+- [x] Lightweight PDF parser + optional pdfjs-dist
+- [x] Optional tesseract.js OCR (filename fallback)
+- [x] Per-file error isolation, yield-to-main, failedCount
+- [x] Batch folder + single multi-file picker in Vault UI
+- [x] optionalDependencies: pdfjs-dist, tesseract.js
+
+## Phase 5–9
 - See docs/06-implementation-plan.md
-  - Phase 4: PDF + OCR ingestion
   - Phase 5: Anonymous web fallback polish
   - Phase 6: Browser extension + OpenSearch
   - Phase 7–9: Tests, CI, release
