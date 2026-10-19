@@ -1,6 +1,6 @@
 {
   "name": "Veritas Semantic Engine",
-  "description": "Local-first private semantic search engine with client-side vector embeddings, AES-256-GCM encryption, IndexedDB indexing, and zero telemetry.",
+  "description": "Local-first private semantic search engine with client-side vector embeddings, AES-256-GCM encryption, IndexedDB indexing, and zero telemetry. No cloud AI.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
