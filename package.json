@@ -32,5 +32,9 @@
   "optionalDependencies": {
     "pdfjs-dist": "^5.4.149",
     "tesseract.js": "^6.0.1"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true,
+    "tesseract.js@6.0.1": true
   }
 }
