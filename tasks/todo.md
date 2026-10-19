@@ -21,9 +21,8 @@
 ## Phase 2 — Search Engine Page UI
 - [x] Redesign default view as clean search-engine page
 - [x] ResultCard, InstantAnswerCard, source badges
-- [x] Dark/light mode polish (dark-first minimal chrome)
-- [x] Accessibility basics (focus, aria-label, keyboard)
-- [ ] Confirm SearchView.tsx on GitHub main
+- [x] Dark/light mode polish
+- [x] Accessibility basics
 
 ## Phase 3–9
 - See docs/06-implementation-plan.md
