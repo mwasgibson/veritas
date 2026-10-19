@@ -13,7 +13,7 @@ interface PassphraseModalProps {
   isOpen: boolean;
   mode: PassphraseMode;
   onClose: () => void;
-  onUnlocked: (key: CryptoKey, salt: Uint8Array, mode: PassphraseMode) => void;
+  onUnlocked: (key: CryptoKey, salt: Uint8Array, mode: PassphraseMode) => void | Promise<void>;
   savedSalt?: Uint8Array | null;
 }
 
@@ -35,6 +35,8 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
     if (!passphrase.trim()) {
       setError('Enter a passphrase');
       return;
@@ -48,19 +50,35 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
         setError('Passphrases do not match');
         return;
       }
+    } else if (!savedSalt || savedSalt.length === 0) {
+      setError('No vault key found on this device. Use Create key first.');
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      setError(
+        'This page is not a secure context. Use https:// or http://localhost so the browser allows key derivation.'
+      );
+      return;
     }
 
     try {
       setIsDeriving(true);
-      setError(null);
-      const salt = isCreate ? generateSalt(16) : savedSalt || generateSalt(16);
+      const salt = isCreate ? generateSalt(16) : new Uint8Array(savedSalt!);
       const derivedKey = await deriveKeyFromPassphrase(passphrase, salt);
-      onUnlocked(derivedKey, salt, mode);
+      await onUnlocked(derivedKey, salt, mode);
       setPassphrase('');
       setConfirm('');
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Key derivation failed');
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Key derivation failed';
+      console.error('PassphraseModal error:', err);
+      setError(msg);
     } finally {
       setIsDeriving(false);
     }
@@ -68,7 +86,7 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
       role="presentation"
     >
@@ -98,8 +116,8 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
             </h2>
             <p className="text-xs text-neutral-500">
               {isCreate
-                ? 'New passphrase · key stays on this device'
-                : 'Enter the passphrase for this vault'}
+                ? 'Choose a passphrase. It never leaves this device.'
+                : 'Enter the passphrase you used when creating the key.'}
             </p>
           </div>
         </div>
@@ -123,8 +141,9 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
               value={passphrase}
               onChange={e => setPassphrase(e.target.value)}
               className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
-              placeholder={isCreate ? 'Choose a strong passphrase' : 'Your vault passphrase'}
+              placeholder={isCreate ? 'At least 8 characters' : 'Your vault passphrase'}
               autoFocus
+              disabled={isDeriving}
             />
           </div>
 
@@ -141,19 +160,21 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
                 onChange={e => setConfirm(e.target.value)}
                 className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
                 placeholder="Repeat passphrase"
+                disabled={isDeriving}
               />
             </div>
           )}
 
           <p className="text-[11px] leading-relaxed text-neutral-600">
-            Derived with PBKDF2 (100k) → AES-256-GCM. Never sent off this device. If you forget
-            the passphrase, encrypted data cannot be recovered.
+            PBKDF2 (100k) → AES-256-GCM. If you forget the passphrase, encrypted data cannot be
+            recovered.
           </p>
 
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
+              disabled={isDeriving}
               className="rounded-md px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200"
             >
               Cancel
