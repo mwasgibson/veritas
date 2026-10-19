@@ -3,175 +3,267 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SearchResultItem, SearchSettings, ConversationalAnswer, DocumentItem, InstantWidget } from '../types';
+import { SearchResultItem, ConversationalAnswer, SearchSettings, InstantWidget, UserRole } from '../types';
 import { storageEngine } from './storage';
-import { embedText, cosineSimilarity, bm25Score, synthesizeConversationalAnswer, chunkDocument } from './semanticEngine';
-import { getInstantAnswers } from './instantAnswers';
+import { resolveInstantAnswer } from './instantAnswers';
+import {
+  generateVector,
+  cosineSimilarity,
+  computeBM25,
+  tokenize,
+  synthesizeLocalAnswer,
+} from './semanticEngine';
 
-const DEFAULT_SETTINGS: SearchSettings = {
-  mode: 'hybrid',
-  hybridWeight: 0.55,
-  minLocalConfidenceThreshold: 0.35,
-  enableWebFallback: true,
-};
-
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-}
-
-/** Rebuild a display snippet from decrypted document content (privacy: vectors store redacted snippets). */
-function liveSnippet(docContent: string, queryTokens: string[], maxLen = 180): string {
-  if (!docContent) return '';
-  const lower = docContent.toLowerCase();
-  let best = 0;
-  let bestIdx = 0;
-  for (const t of queryTokens) {
-    const i = lower.indexOf(t);
-    if (i >= 0 && (best === 0 || i < bestIdx)) {
-      bestIdx = i;
-      best = 1;
-    }
-  }
-  const start = Math.max(0, bestIdx - 40);
-  let snip = docContent.slice(start, start + maxLen);
-  if (start > 0) snip = '…' + snip;
-  if (start + maxLen < docContent.length) snip = snip + '…';
-  return snip;
-}
-
-export async function runSearch(
-  query: string,
-  masterKey: CryptoKey | null,
-  settings: Partial<SearchSettings> = {}
-): Promise<{
+export interface SearchExecutionResult {
+  query: string;
   results: SearchResultItem[];
-  conversational: ConversationalAnswer | null;
-  instants: InstantWidget[];
-  usedWebFallback: boolean;
-}> {
-  const cfg = { ...DEFAULT_SETTINGS, ...settings };
-  const q = query.trim();
-  if (!q) {
-    return { results: [], conversational: null, instants: [], usedWebFallback: false };
+  instantWidget?: InstantWidget;
+  conversationalAnswer?: ConversationalAnswer;
+  totalTimeMs: number;
+  localResultsCount: number;
+  webResultsCount: number;
+}
+
+/**
+ * Execute Dual-Layer Search: Local Semantic Index First + Anonymous Fallback
+ */
+export async function executeSearch(
+  query: string,
+  settings: SearchSettings,
+  masterKey?: CryptoKey | null,
+  actorRole: UserRole = 'owner'
+): Promise<SearchExecutionResult> {
+  const startTime = performance.now();
+  const trimmed = query.trim();
+
+  if (!trimmed) {
+    return {
+      query,
+      results: [],
+      totalTimeMs: 0,
+      localResultsCount: 0,
+      webResultsCount: 0,
+    };
   }
 
-  const instants = getInstantAnswers(q);
-  const queryTokens = tokenize(q);
-  const queryVec = embedText(q);
+  const instantWidget = await resolveInstantAnswer(trimmed);
 
-  const vectors = await storageEngine.getAllVectors();
-  const docs = masterKey ? await storageEngine.getAllDocuments(masterKey) : [];
+  await storageEngine.recordAudit(
+    'QUERY',
+    actorRole,
+    `Executed search: "${trimmed.slice(0, 50)}${trimmed.length > 50 ? '...' : ''}" [Mode: ${settings.searchMode}]`
+  );
+
+  const [docs, vectorChunks] = await Promise.all([
+    storageEngine.getAllDocuments(masterKey),
+    storageEngine.getAllVectors(),
+  ]);
+
+  const queryTokens = tokenize(trimmed);
+  const queryVector = generateVector(trimmed);
   const docMap = new Map(docs.map(d => [d.id, d]));
 
-  // Score local chunks
-  const scored: { chunkId: string; docId: string; score: number; semantic: number; lexical: number }[] = [];
-  const avgDl = vectors.reduce((s, v) => s + (v.tokenCount || 1), 0) / (vectors.length || 1);
+  const docChunkScores = new Map<
+    string,
+    { bestVectorSim: number; bestSnippet: string; keywords: string[] }
+  >();
 
-  for (const v of vectors) {
-    const semantic = cosineSimilarity(queryVec, v.embedding);
-    const docTokens = tokenize(v.text || v.snippet || '');
-    const lexical = bm25Score(queryTokens, docTokens, avgDl);
-    const score =
-      cfg.mode === 'semantic'
-        ? semantic
-        : cfg.mode === 'keyword'
-          ? lexical
-          : cfg.hybridWeight * semantic + (1 - cfg.hybridWeight) * lexical;
-    scored.push({ chunkId: v.id, docId: v.docId, score, semantic, lexical });
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-
-  // Dedup by doc, take top
-  const seen = new Set<string>();
-  const results: SearchResultItem[] = [];
-  for (const s of scored) {
-    if (seen.has(s.docId)) continue;
-    seen.add(s.docId);
-    const doc = docMap.get(s.docId);
-    const title = doc?.title || s.docId;
-    const content = doc?.content || '';
-    const snippet = liveSnippet(content, queryTokens);
-    results.push({
-      id: s.chunkId,
-      docId: s.docId,
-      title,
-      snippet,
-      score: s.score,
-      source: 'local',
-      category: doc?.category,
-    });
-    if (results.length >= 20) break;
-  }
-
-  const topScore = results[0]?.score ?? 0;
-  let usedWebFallback = false;
-
-  // Anonymous web fallback when local confidence is low
-  if (cfg.enableWebFallback && topScore < cfg.minLocalConfidenceThreshold) {
-    try {
-      const web = await fetchAnonymousWeb(q);
-      for (const w of web) {
-        results.push(w);
-      }
-      usedWebFallback = web.length > 0;
-    } catch {
-      // offline or blocked — ignore
-    }
-  }
-
-  // Conversational extractive answer from top local passages
-  const passages = results
-    .filter(r => r.source === 'local')
-    .slice(0, 5)
-    .map(r => ({
-      text: r.snippet,
-      title: r.title,
-      score: r.score,
-    }));
-  const conversational =
-    passages.length > 0 ? synthesizeConversationalAnswer(q, passages) : null;
-
-  return { results, conversational, instants, usedWebFallback };
-}
-
-async function fetchAnonymousWeb(query: string): Promise<SearchResultItem[]> {
-  // DuckDuckGo Instant Answer / OpenSearch-style (headers stripped, no identity)
-  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      // deliberately minimal headers — no cookies, no auth
-    },
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  const out: SearchResultItem[] = [];
-  if (data.AbstractText) {
-    out.push({
-      id: `web_ddg_${Date.now()}`,
-      docId: 'web',
-      title: data.Heading || 'Web',
-      snippet: data.AbstractText,
-      score: 0.3,
-      source: 'web',
-      url: data.AbstractURL || undefined,
-    });
-  }
-  const related = data.RelatedTopics || [];
-  for (const t of related.slice(0, 5)) {
-    if (t.Text) {
-      out.push({
-        id: `web_rel_${Math.random().toString(36).slice(2, 8)}`,
-        docId: 'web',
-        title: (t.FirstURL || '').replace(/^https?:\/\//, '').slice(0, 40) || 'Related',
-        snippet: t.Text,
-        score: 0.25,
-        source: 'web',
-        url: t.FirstURL,
+  for (const chunk of vectorChunks) {
+    const sim = cosineSimilarity(queryVector, chunk.vector);
+    const existing = docChunkScores.get(chunk.docId);
+    if (!existing || sim > existing.bestVectorSim) {
+      const doc = docMap.get(chunk.docId);
+      const liveSnippet =
+        chunk.snippet ||
+        (doc?.content ? doc.content.slice(0, 400) : '') ||
+        (chunk.keywords?.length ? chunk.keywords.join(' ') : '');
+      docChunkScores.set(chunk.docId, {
+        bestVectorSim: sim,
+        bestSnippet: liveSnippet,
+        keywords: chunk.keywords,
       });
     }
   }
-  return out;
+
+  const localResults: SearchResultItem[] = [];
+
+  for (const doc of docs) {
+    const chunkInfo = docChunkScores.get(doc.id) || {
+      bestVectorSim: 0,
+      bestSnippet: doc.content ? doc.content.slice(0, 300) : '',
+      keywords: [],
+    };
+
+    const docTokens = tokenize(doc.title + ' ' + (doc.content || '') + ' ' + (doc.tags || []).join(' '));
+    const bm25 = computeBM25(queryTokens, docTokens);
+
+    let hybridScore = 0;
+    if (settings.searchMode === 'semantic') {
+      hybridScore = chunkInfo.bestVectorSim;
+    } else if (settings.searchMode === 'exact') {
+      hybridScore = bm25;
+    } else {
+      const alpha = settings.hybridWeight;
+      hybridScore = alpha * chunkInfo.bestVectorSim + (1 - alpha) * bm25;
+    }
+
+    const highlightWords = queryTokens.filter(
+      t => docTokens.includes(t) || doc.title.toLowerCase().includes(t)
+    );
+
+    if (hybridScore >= settings.minLocalConfidenceThreshold || bm25 > 0.25) {
+      localResults.push({
+        docId: doc.id,
+        title: doc.title,
+        category: doc.category,
+        snippet:
+          chunkInfo.bestSnippet ||
+          (doc.content ? doc.content.slice(0, 280) + '...' : 'Encrypted document'),
+        highlightWords,
+        vectorScore: Math.round(chunkInfo.bestVectorSim * 100) / 100,
+        bm25Score: Math.round(bm25 * 100) / 100,
+        hybridScore: Math.round(hybridScore * 100) / 100,
+        latencyMs: 0,
+        source: 'local',
+        encrypted: !!doc.encryptedPayload,
+        filePath: doc.filePath,
+        fileExtension: doc.fileExtension,
+      });
+    }
+  }
+
+  localResults.sort((a, b) => b.hybridScore - a.hybridScore);
+
+  let conversationalAnswer: ConversationalAnswer | undefined = undefined;
+  const isConversationalQuery =
+    settings.searchMode === 'conversational' ||
+    trimmed.endsWith('?') ||
+    /^(what|how|where|when|why|who|can|is|does|tell|show)\b/i.test(trimmed);
+
+  if (isConversationalQuery) {
+    const matchingDocItems = localResults.map(r => {
+      const doc = docMap.get(r.docId);
+      return {
+        id: r.docId,
+        title: r.title,
+        content: doc?.content || r.snippet,
+        score: r.hybridScore,
+      };
+    });
+
+    if (matchingDocItems.length > 0) {
+      conversationalAnswer = synthesizeLocalAnswer(trimmed, matchingDocItems);
+    } else if (instantWidget) {
+      const answerText =
+        instantWidget.type === 'time'
+          ? `The current ${instantWidget.title.toLowerCase()} is ${instantWidget.primaryValue} (${instantWidget.secondaryValue || ''}). ${instantWidget.details || ''}`
+          : instantWidget.type === 'date'
+            ? `Today's date is ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
+            : instantWidget.type === 'storage'
+              ? `Local machine storage status: ${instantWidget.primaryValue} (${instantWidget.secondaryValue || ''}). ${instantWidget.details || ''}`
+              : instantWidget.type === 'system'
+                ? `Your machine specifications: ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
+                : instantWidget.type === 'activity'
+                  ? `Your machine activity history: ${instantWidget.primaryValue}. ${instantWidget.secondaryValue || ''}. ${instantWidget.details || ''}`
+                  : instantWidget.type === 'calculator'
+                    ? `Calculation: ${instantWidget.secondaryValue || instantWidget.primaryValue}`
+                    : instantWidget.primaryValue;
+
+      conversationalAnswer = {
+        query: trimmed,
+        synthesizedAnswer: answerText,
+        citations: [],
+        confidence: 1.0,
+      };
+    }
+  }
+
+  const webResults: SearchResultItem[] = [];
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+  if (isOnline && settings.enableWebFallback) {
+    try {
+      const externalMatches = await fetchAnonymousWebResults(trimmed);
+      webResults.push(...externalMatches);
+    } catch (err) {
+      console.warn('Anonymous web query exception:', err);
+    }
+  }
+
+  const endTime = performance.now();
+  const totalTimeMs = Math.round((endTime - startTime) * 10) / 10;
+
+  for (const r of localResults) {
+    r.latencyMs = totalTimeMs;
+  }
+
+  return {
+    query: trimmed,
+    results: [...localResults, ...webResults],
+    instantWidget: instantWidget || undefined,
+    conversationalAnswer,
+    totalTimeMs,
+    localResultsCount: localResults.length,
+    webResultsCount: webResults.length,
+  };
+}
+
+async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem[]> {
+  const sanitizedQuery = encodeURIComponent(query.replace(/[^\w\s-]/gi, '').trim());
+  if (!sanitizedQuery) return [];
+
+  const url = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${sanitizedQuery}&limit=8&namespace=0&format=json&origin=*`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timeoutId);
+    return [];
+  }
+  clearTimeout(timeoutId);
+
+  if (!response.ok) return [];
+
+  const data = await response.json();
+  const titles = data[1] || [];
+  const descriptions = data[2] || [];
+  const urls = data[3] || [];
+
+  const queryTerms = tokenize(query);
+  const results: SearchResultItem[] = [];
+
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i];
+    const desc = descriptions[i] || `Live web search result for "${title}"`;
+    const webUrl = urls[i] || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+
+    const snippetTokens = tokenize(title + ' ' + desc);
+    const overlap = queryTerms.filter(t => snippetTokens.includes(t)).length;
+    const matchScore = Math.max(0.4, Math.min(0.95, overlap / Math.max(1, queryTerms.length)));
+
+    results.push({
+      docId: `web_${i}_${Date.now()}`,
+      title,
+      category: 'web',
+      snippet: desc,
+      highlightWords: queryTerms,
+      vectorScore: matchScore,
+      bm25Score: matchScore,
+      hybridScore: Math.round(matchScore * 100) / 100,
+      latencyMs: 140,
+      source: 'web',
+      encrypted: false,
+      sourceUrl: webUrl,
+    });
+  }
+
+  return results;
 }
