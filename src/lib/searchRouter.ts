@@ -46,17 +46,14 @@ export async function executeSearch(
     };
   }
 
-  // 0. Resolve Instant Utility Answers (Time, Date, Calculations, Direct Facts) immediately
   const instantWidget = await resolveInstantAnswer(trimmed);
 
-  // Record audit query
   await storageEngine.recordAudit(
     'QUERY',
     actorRole,
     `Executed search: "${trimmed.slice(0, 50)}${trimmed.length > 50 ? '...' : ''}" [Mode: ${settings.searchMode}]`
   );
 
-  // 1. Fetch all local documents and precomputed vector chunks
   const [docs, vectorChunks] = await Promise.all([
     storageEngine.getAllDocuments(masterKey),
     storageEngine.getAllVectors(),
@@ -64,11 +61,8 @@ export async function executeSearch(
 
   const queryTokens = tokenize(trimmed);
   const queryVector = generateVector(trimmed);
-
-  // Map docId -> document for rapid metadata lookup
   const docMap = new Map(docs.map(d => [d.id, d]));
 
-  // Calculate scores per document by taking the maximum chunk similarity
   const docChunkScores = new Map<
     string,
     { bestVectorSim: number; bestSnippet: string; keywords: string[] }
@@ -78,15 +72,20 @@ export async function executeSearch(
     const sim = cosineSimilarity(queryVector, chunk.vector);
     const existing = docChunkScores.get(chunk.docId);
     if (!existing || sim > existing.bestVectorSim) {
+      // Prefer in-memory decrypted doc content when snippet was redacted at rest
+      const doc = docMap.get(chunk.docId);
+      const liveSnippet =
+        chunk.snippet ||
+        (doc?.content ? doc.content.slice(0, 400) : '') ||
+        (chunk.keywords?.length ? chunk.keywords.join(' ') : '');
       docChunkScores.set(chunk.docId, {
         bestVectorSim: sim,
-        bestSnippet: chunk.snippet,
+        bestSnippet: liveSnippet,
         keywords: chunk.keywords,
       });
     }
   }
 
-  // Score each local document
   const localResults: SearchResultItem[] = [];
 
   for (const doc of docs) {
@@ -96,28 +95,23 @@ export async function executeSearch(
       keywords: [],
     };
 
-    // Calculate lexical BM25
     const docTokens = tokenize(doc.title + ' ' + (doc.content || '') + ' ' + doc.tags.join(' '));
     const bm25 = computeBM25(queryTokens, docTokens);
 
-    // Compute hybrid weighted score based on settings
     let hybridScore = 0;
     if (settings.searchMode === 'semantic') {
       hybridScore = chunkInfo.bestVectorSim;
     } else if (settings.searchMode === 'exact') {
       hybridScore = bm25;
     } else {
-      // Hybrid mode (default: 0.65 vector + 0.35 BM25)
       const alpha = settings.hybridWeight;
       hybridScore = alpha * chunkInfo.bestVectorSim + (1 - alpha) * bm25;
     }
 
-    // Identify highlight words from query that appear in title or content
     const highlightWords = queryTokens.filter(t =>
       docTokens.includes(t) || doc.title.toLowerCase().includes(t)
     );
 
-    // Threshold filter: only include if above minimum confidence threshold or exact match
     if (hybridScore >= settings.minLocalConfidenceThreshold || bm25 > 0.25) {
       localResults.push({
         docId: doc.id,
@@ -128,7 +122,7 @@ export async function executeSearch(
         vectorScore: Math.round(chunkInfo.bestVectorSim * 100) / 100,
         bm25Score: Math.round(bm25 * 100) / 100,
         hybridScore: Math.round(hybridScore * 100) / 100,
-        latencyMs: 0, // Will be set after timing
+        latencyMs: 0,
         source: 'local',
         encrypted: !!doc.encryptedPayload,
         filePath: doc.filePath,
@@ -137,10 +131,8 @@ export async function executeSearch(
     }
   }
 
-  // Sort local results by descending hybrid score
   localResults.sort((a, b) => b.hybridScore - a.hybridScore);
 
-  // 2. Synthesize conversational answer if requested or if query is conversational
   let conversationalAnswer: ConversationalAnswer | undefined = undefined;
   const isConversationalQuery =
     settings.searchMode === 'conversational' ||
@@ -161,7 +153,6 @@ export async function executeSearch(
     if (matchingDocItems.length > 0) {
       conversationalAnswer = synthesizeLocalAnswer(trimmed, matchingDocItems);
     } else if (instantWidget) {
-      // Direct synthesize from instant utility widget (Time, Date, Storage, System, Activity, Calculator)
       const answerText =
         instantWidget.type === 'time'
           ? `The current ${instantWidget.title.toLowerCase()} is ${instantWidget.primaryValue} (${instantWidget.secondaryValue}). ${instantWidget.details || ''}`
@@ -186,8 +177,6 @@ export async function executeSearch(
     }
   }
 
-  // 3. Fallback / Live Internet Search:
-  // As required: ALWAYS search the internet if the machine recognizes it is connected to the internet
   const webResults: SearchResultItem[] = [];
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
 
@@ -203,7 +192,6 @@ export async function executeSearch(
   const endTime = performance.now();
   const totalTimeMs = Math.round((endTime - startTime) * 10) / 10;
 
-  // Stamp latency on local items
   for (const r of localResults) {
     r.latencyMs = totalTimeMs;
   }
@@ -219,15 +207,10 @@ export async function executeSearch(
   };
 }
 
-/**
- * Anonymous External Web Search Provider.
- * Strips user headers, cookies, and local identifiers, querying live public knowledge indexes.
- */
 async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem[]> {
   const sanitizedQuery = encodeURIComponent(query.replace(/[^\w\s-]/gi, '').trim());
   if (!sanitizedQuery) return [];
 
-  // Query Wikipedia OpenSearch API (anonymous, privacy-preserving, live index)
   const url = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${sanitizedQuery}&limit=8&namespace=0&format=json&origin=*`;
 
   const controller = new AbortController();
@@ -237,11 +220,8 @@ async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem
   try {
     response = await fetch(url, {
       method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
+      headers: { Accept: 'application/json' },
       signal: controller.signal,
-      // No credentials, no cookies, no tracking
     });
   } catch {
     clearTimeout(timeoutId);
@@ -264,7 +244,6 @@ async function fetchAnonymousWebResults(query: string): Promise<SearchResultItem
     const desc = descriptions[i] || `Live web search result for "${title}"`;
     const webUrl = urls[i] || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
 
-    // Compute basic lexical match score for the web snippet
     const snippetTokens = tokenize(title + ' ' + desc);
     const overlap = queryTerms.filter(t => snippetTokens.includes(t)).length;
     const matchScore = Math.max(0.4, Math.min(0.95, overlap / Math.max(1, queryTerms.length)));
