@@ -69,13 +69,13 @@ export async function exportEncryptedSyncBundle(
     exportedAt: Date.now(),
     encryptedBlob: JSON.stringify(encrypted),
     checksum,
-    deviceFingerprint: \`device_\${Math.random().toString(36).substring(2, 8)}\`,
+    deviceFingerprint: `device_${Math.random().toString(36).substring(2, 8)}`,
   };
 
   await storageEngine.recordAudit(
     'EXPORT',
     actorRole,
-    \`Exported encrypted sync payload with \${docs.length} documents (SHA-256: \${checksum.slice(0, 8)}...)\`
+    `Exported encrypted sync payload with ${docs.length} documents (SHA-256: ${checksum.slice(0, 8)}...)`
   );
 
   return JSON.stringify(payload, null, 2);
@@ -124,7 +124,7 @@ export async function importEncryptedSyncBundle(
   await storageEngine.recordAudit(
     'SYNC',
     actorRole,
-    \`Successfully merged \${importedCount} documents from encrypted sync payload\`
+    `Successfully merged ${importedCount} documents from encrypted sync payload`
   );
 
   return {
