@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Unlock the vault with a passphrase, ingest documents, and search.
+Open `http://localhost:3000`. Unlock the vault with a passphrase, ingest documents, and search.
 
 No API keys. No cloud AI. No analytics.
 
