@@ -3,20 +3,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DocumentItem, VectorChunk, AuditLogEntry, UserRole } from "../types";
-import { computeSha256, encryptText, decryptText } from "./crypto";
-import { chunkDocument } from "./semanticEngine";
+import { DocumentItem, VectorChunk, AuditLogEntry, UserRole } from '../types';
+import { computeSha256, encryptText, decryptText } from './crypto';
+import { chunkDocument } from './semanticEngine';
 
-const DB_NAME = "Veritas_Private_Storage_v1";
+const DB_NAME = 'Veritas_Private_Storage_v1';
 const DB_VERSION = 1;
+
+/** Roles that may mutate vault content (ingest, purge, sync). */
+const WRITE_ROLES: UserRole[] = ['owner'];
+/** Roles that may change settings or re-key. */
+const ADMIN_ROLES: UserRole[] = ['owner'];
+
+/**
+ * Enforce RBAC at the storage boundary. UI checks are not sufficient.
+ */
+export function assertCanWrite(role: UserRole, action = 'write'): void {
+  if (!WRITE_ROLES.includes(role)) {
+    throw new Error(`RBAC: role "${role}" is not permitted to ${action}`);
+  }
+}
+
+export function assertCanAdmin(role: UserRole, action = 'admin'): void {
+  if (!ADMIN_ROLES.includes(role)) {
+    throw new Error(`RBAC: role "${role}" is not permitted to ${action}`);
+  }
+}
 
 /**
  * Native IndexedDB Wrapper for Veritas Sovereign Engine
  */
 export class StorageEngine {
   private db: IDBDatabase | null = null;
-  private lastAuditHash =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+  private lastAuditHash = '0000000000000000000000000000000000000000000000000000000000000000';
 
   async init(): Promise<void> {
     if (this.db) return;
@@ -24,33 +43,25 @@ export class StorageEngine {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = event => {
         const db = (event.target as IDBOpenDBRequest).result;
 
-        // Documents Store
-        if (!db.objectStoreNames.contains("documents")) {
-          db.createObjectStore("documents", { keyPath: "id" });
+        if (!db.objectStoreNames.contains('documents')) {
+          db.createObjectStore('documents', { keyPath: 'id' });
         }
 
-        // Vectors Store
-        if (!db.objectStoreNames.contains("vectors")) {
-          const vectorStore = db.createObjectStore("vectors", {
-            autoIncrement: true,
-          });
-          vectorStore.createIndex("docId", "docId", { unique: false });
+        if (!db.objectStoreNames.contains('vectors')) {
+          const vectorStore = db.createObjectStore('vectors', { autoIncrement: true });
+          vectorStore.createIndex('docId', 'docId', { unique: false });
         }
 
-        // Audit Logs Store
-        if (!db.objectStoreNames.contains("audit_logs")) {
-          const auditStore = db.createObjectStore("audit_logs", {
-            keyPath: "id",
-          });
-          auditStore.createIndex("timestamp", "timestamp", { unique: false });
+        if (!db.objectStoreNames.contains('audit_logs')) {
+          const auditStore = db.createObjectStore('audit_logs', { keyPath: 'id' });
+          auditStore.createIndex('timestamp', 'timestamp', { unique: false });
         }
 
-        // Settings Store
-        if (!db.objectStoreNames.contains("settings")) {
-          db.createObjectStore("settings", { keyPath: "key" });
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
         }
       };
 
@@ -73,21 +84,16 @@ export class StorageEngine {
     }
   }
 
-  /**
-   * Record a tamper-evident audit log entry
-   */
   async recordAudit(
-    action: AuditLogEntry["action"],
+    action: AuditLogEntry['action'],
     actorRole: UserRole,
-    details: string,
+    details: string
   ): Promise<AuditLogEntry> {
     await this.init();
     const timestamp = Date.now();
     const id = `audit_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
     const prevHash = this.lastAuditHash;
-    const hash = await computeSha256(
-      `${prevHash}:${action}:${actorRole}:${details}:${timestamp}`,
-    );
+    const hash = await computeSha256(`${prevHash}:${action}:${actorRole}:${details}:${timestamp}`);
     this.lastAuditHash = hash;
 
     const entry: AuditLogEntry = {
@@ -101,23 +107,20 @@ export class StorageEngine {
     };
 
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("audit_logs", "readwrite");
-      const store = tx.objectStore("audit_logs");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('audit_logs', 'readwrite');
+      const store = tx.objectStore('audit_logs');
       const request = store.add(entry);
       request.onsuccess = () => resolve(entry);
       request.onerror = () => reject(request.error);
     });
   }
 
-  /**
-   * Save a document, chunk it, generate vector embeddings, and encrypt if masterKey is supplied
-   */
   async saveDocument(
     doc: {
       id?: string;
       title: string;
-      category: DocumentItem["category"];
+      category: DocumentItem['category'];
       content: string;
       tags?: string[];
       filePath?: string;
@@ -125,20 +128,23 @@ export class StorageEngine {
       fileExtension?: string;
     },
     masterKey?: CryptoKey | null,
-    actorRole: UserRole = "owner",
+    actorRole: UserRole = 'owner'
   ): Promise<DocumentItem> {
+    assertCanWrite(actorRole, 'ingest documents');
     await this.init();
-    const id =
-      doc.id ||
-      `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    if (!masterKey) {
+      throw new Error(
+        'Vault is locked or no master key is available. Unlock with your passphrase before ingesting.'
+      );
+    }
+
+    const id = doc.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const now = Date.now();
     const tags = doc.tags || [];
     const tokensCount = doc.content.split(/\s+/).length;
 
-    let encryptedPayload = undefined;
-    if (masterKey) {
-      encryptedPayload = await encryptText(doc.content, masterKey);
-    }
+    const encryptedPayload = await encryptText(doc.content, masterKey);
 
     const documentItem: DocumentItem = {
       id,
@@ -156,36 +162,28 @@ export class StorageEngine {
       version: 1,
     };
 
-    // 1. Save document item
     await new Promise<void>((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("documents", "readwrite");
-      const store = tx.objectStore("documents");
-      // Store on disk without plaintext content if encrypted
-      const recordToStore = encryptedPayload
-        ? { ...documentItem, content: "" }
-        : documentItem;
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('documents', 'readwrite');
+      const store = tx.objectStore('documents');
+      const recordToStore = { ...documentItem, content: '' };
       const req = store.put(recordToStore);
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
 
-    // 2. Index vectors
-    const chunks = chunkDocument(id, doc.content);
+    const chunks = chunkDocument(id, doc.content, 300, 50, true);
     await new Promise<void>((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("vectors", "readwrite");
-      const store = tx.objectStore("vectors");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('vectors', 'readwrite');
+      const store = tx.objectStore('vectors');
 
-      // Remove existing vectors for this docId first
-      const index = store.index("docId");
+      const index = store.index('docId');
       const keyReq = index.getAllKeys(id);
       keyReq.onsuccess = () => {
-        const keys = keyReq.result;
-        for (const k of keys) {
+        for (const k of keyReq.result) {
           store.delete(k);
         }
-        // Add new chunks
         for (const chunk of chunks) {
           store.add(chunk);
         }
@@ -195,23 +193,20 @@ export class StorageEngine {
     });
 
     await this.recordAudit(
-      "INGEST",
+      'INGEST',
       actorRole,
-      `Indexed document "${doc.title}" (${tokensCount} tokens, ${chunks.length} vector chunks)`,
+      `Indexed document "${doc.title}" (${tokensCount} tokens, ${chunks.length} vector chunks, encrypted)`
     );
 
     return documentItem;
   }
 
-  /**
-   * Fetch all documents. If masterKey is provided, decrypts content.
-   */
   async getAllDocuments(masterKey?: CryptoKey | null): Promise<DocumentItem[]> {
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("documents", "readonly");
-      const store = tx.objectStore("documents");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('documents', 'readonly');
+      const store = tx.objectStore('documents');
       const req = store.getAll();
 
       req.onsuccess = async () => {
@@ -221,10 +216,7 @@ export class StorageEngine {
         for (const doc of rawDocs) {
           if (doc.encryptedPayload && masterKey) {
             try {
-              const decryptedContent = await decryptText(
-                doc.encryptedPayload,
-                masterKey,
-              );
+              const decryptedContent = await decryptText(doc.encryptedPayload, masterKey);
               decryptedDocs.push({
                 ...doc,
                 content: decryptedContent,
@@ -242,38 +234,30 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Fetch all vector chunks for similarity comparisons
-   */
   async getAllVectors(): Promise<VectorChunk[]> {
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("vectors", "readonly");
-      const store = tx.objectStore("vectors");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('vectors', 'readonly');
+      const store = tx.objectStore('vectors');
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => reject(req.error);
     });
   }
 
-  /**
-   * Delete a document and its associated vector chunks
-   */
-  async deleteDocument(
-    id: string,
-    actorRole: UserRole = "owner",
-  ): Promise<void> {
+  async deleteDocument(id: string, actorRole: UserRole = 'owner'): Promise<void> {
+    assertCanWrite(actorRole, 'delete documents');
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction(["documents", "vectors"], "readwrite");
-      const docStore = tx.objectStore("documents");
-      const vectorStore = tx.objectStore("vectors");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction(['documents', 'vectors'], 'readwrite');
+      const docStore = tx.objectStore('documents');
+      const vectorStore = tx.objectStore('vectors');
 
       docStore.delete(id);
 
-      const index = vectorStore.index("docId");
+      const index = vectorStore.index('docId');
       const keyReq = index.getAllKeys(id);
       keyReq.onsuccess = () => {
         for (const k of keyReq.result) {
@@ -282,39 +266,31 @@ export class StorageEngine {
       };
 
       tx.oncomplete = async () => {
-        await this.recordAudit("PURGE", actorRole, `Deleted document ID ${id}`);
+        await this.recordAudit('PURGE', actorRole, `Deleted document ID ${id}`);
         resolve();
       };
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  /**
-   * Clear all documents and vectors
-   */
-  async clearAll(actorRole: UserRole = "owner"): Promise<void> {
+  async clearAll(actorRole: UserRole = 'owner'): Promise<void> {
+    assertCanWrite(actorRole, 'wipe vault');
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction(["documents", "vectors"], "readwrite");
-      tx.objectStore("documents").clear();
-      tx.objectStore("vectors").clear();
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction(['documents', 'vectors'], 'readwrite');
+      tx.objectStore('documents').clear();
+      tx.objectStore('vectors').clear();
       tx.oncomplete = async () => {
-        await this.recordAudit(
-          "PURGE",
-          actorRole,
-          "Wiped all documents and vectors from storage vault",
-        );
+        await this.recordAudit('PURGE', actorRole, 'Wiped all documents and vectors from storage vault');
         resolve();
       };
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  /**
-   * Automatically purge legacy mock/demo documents that do not belong to a real machine file
-   */
-  async purgeLegacyMockData(actorRole: UserRole = "owner"): Promise<number> {
+  async purgeLegacyMockData(actorRole: UserRole = 'owner'): Promise<number> {
+    assertCanWrite(actorRole, 'purge legacy data');
     await this.init();
     const docs = await this.getAllDocuments(null);
     let purgedCount = 0;
@@ -322,14 +298,14 @@ export class StorageEngine {
     for (const doc of docs) {
       const isLegacyMock =
         !doc.filePath ||
-        doc.id.startsWith("doc_") ||
-        doc.title.includes("Financial Statement") ||
-        doc.title.includes("Cardiovascular") ||
-        doc.title.includes("Lease Agreement") ||
-        doc.title.includes("Vacation Itinerary") ||
-        doc.title.includes("Distributed Systems") ||
-        doc.title.includes("Cryptographic Key Derivation & E2EE") ||
-        doc.title.includes("Unit Test Document Ingestion");
+        doc.id.startsWith('doc_') ||
+        doc.title.includes('Financial Statement') ||
+        doc.title.includes('Cardiovascular') ||
+        doc.title.includes('Lease Agreement') ||
+        doc.title.includes('Vacation Itinerary') ||
+        doc.title.includes('Distributed Systems') ||
+        doc.title.includes('Cryptographic Key Derivation') ||
+        doc.title.includes('Unit Test Document Ingestion');
 
       if (isLegacyMock) {
         await this.deleteDocument(doc.id, actorRole);
@@ -337,12 +313,11 @@ export class StorageEngine {
       }
     }
 
-    // Also remove old database if it exists in browser profile
-    if (typeof indexedDB !== "undefined" && "databases" in indexedDB) {
+    if (typeof indexedDB !== 'undefined' && 'databases' in indexedDB) {
       try {
         const dbs = await indexedDB.databases();
         for (const dbInfo of dbs) {
-          if (dbInfo.name && dbInfo.name.startsWith("Aegis_")) {
+          if (dbInfo.name && dbInfo.name.startsWith('Aegis_')) {
             indexedDB.deleteDatabase(dbInfo.name);
           }
         }
@@ -354,30 +329,24 @@ export class StorageEngine {
     return purgedCount;
   }
 
-  /**
-   * Retrieve all audit log entries
-   */
   async getAuditLogs(): Promise<AuditLogEntry[]> {
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("audit_logs", "readonly");
-      const store = tx.objectStore("audit_logs");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('audit_logs', 'readonly');
+      const store = tx.objectStore('audit_logs');
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => reject(req.error);
     });
   }
 
-  /**
-   * Retrieve a setting value from IndexedDB
-   */
   async getSetting<T>(key: string): Promise<T | null> {
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("settings", "readonly");
-      const store = tx.objectStore("settings");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('settings', 'readonly');
+      const store = tx.objectStore('settings');
       const req = store.get(key);
       req.onsuccess = () => {
         resolve(req.result ? (req.result.value as T) : null);
@@ -386,15 +355,12 @@ export class StorageEngine {
     });
   }
 
-  /**
-   * Persist a setting value in IndexedDB
-   */
   async setSetting(key: string, value: any): Promise<void> {
     await this.init();
     return new Promise((resolve, reject) => {
-      if (!this.db) return reject(new Error("DB not initialized"));
-      const tx = this.db.transaction("settings", "readwrite");
-      const store = tx.objectStore("settings");
+      if (!this.db) return reject(new Error('DB not initialized'));
+      const tx = this.db.transaction('settings', 'readwrite');
+      const store = tx.objectStore('settings');
       const req = store.put({ key, value });
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
