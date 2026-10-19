@@ -22,7 +22,6 @@ import {
 } from './types';
 import { storageEngine } from './lib/storage';
 import { executeSearch } from './lib/searchRouter';
-import { deriveKeyFromPassphrase, generateSalt } from './lib/crypto';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'search' | 'vault' | 'browser' | 'audit' | 'docs'>('search');
@@ -30,13 +29,14 @@ export default function App() {
   const [masterKey, setMasterKey] = useState<CryptoKey | null>(null);
   const [vaultSalt, setVaultSalt] = useState<Uint8Array | null>(null);
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  const [passphraseMode, setPassphraseMode] = useState<'unlock' | 'create'>('unlock');
+  const [hasVaultKey, setHasVaultKey] = useState(false);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [connectedFolder, setConnectedFolder] = useState<ConnectedFolder | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
 
-  // Search State
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [instantWidget, setInstantWidget] = useState<InstantWidget | undefined>(undefined);
@@ -56,27 +56,22 @@ export default function App() {
     anonymousProxyDomain: 'wikimedia.org',
   });
 
-  // Track network connectivity in real-time
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  // Refresh document list and connected folder from IndexedDB
   const refreshDocuments = useCallback(async (keyToUse = masterKey) => {
     try {
       await storageEngine.init();
       const docs = await storageEngine.getAllDocuments(keyToUse);
       setDocuments(docs);
-
       const savedFolder = await storageEngine.getSetting<ConnectedFolder>('connected_folder');
       setConnectedFolder(savedFolder);
     } catch (err) {
@@ -84,7 +79,6 @@ export default function App() {
     }
   }, [masterKey]);
 
-  // Handle Search Execution
   const handlePerformSearch = useCallback(
     async (searchQuery: string, currentSettings = settings) => {
       if (!searchQuery.trim()) {
@@ -93,7 +87,6 @@ export default function App() {
         setConversationalAnswer(undefined);
         return;
       }
-
       setIsSearching(true);
       try {
         const result = await executeSearch(searchQuery, currentSettings, masterKey, userRole);
@@ -114,33 +107,35 @@ export default function App() {
     [masterKey, settings, userRole]
   );
 
-  // Initial bootstrap: Initialize DB, derive key, check URL ?q=... (Zero mock data)
   useEffect(() => {
     const bootstrap = async () => {
       try {
         await storageEngine.init();
-
-        const defaultSalt = generateSalt(16);
-        setVaultSalt(defaultSalt);
-
-        // Derive sovereign session key for local IndexedDB encryption
-        const initialKey = await deriveKeyFromPassphrase('veritas-sovereign-vault-2026', defaultSalt);
-        setMasterKey(initialKey);
-
-        // Automatically purge any lingering mock/demo data from previous test loads
         await storageEngine.purgeLegacyMockData('owner');
 
-        // Load existing real documents (if user connected a machine folder)
-        await refreshDocuments(initialKey);
+        const saltB64 = await storageEngine.getSetting<string>('vault_salt_b64');
+        if (saltB64) {
+          try {
+            const bin = atob(saltB64);
+            const salt = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) salt[i] = bin.charCodeAt(i);
+            setVaultSalt(salt);
+            setHasVaultKey(true);
+          } catch {
+            setHasVaultKey(false);
+          }
+        } else {
+          setHasVaultKey(false);
+        }
 
-        // Check if URL has ?q= search parameter from browser omnibox or direct query
+        await refreshDocuments(null);
+
         const urlParams = new URLSearchParams(window.location.search);
         const queryParam = urlParams.get('q');
         if (queryParam) {
           setQuery(queryParam);
           setCurrentTab('search');
-          // Execute search immediately
-          const result = await executeSearch(queryParam, settings, initialKey, 'owner');
+          const result = await executeSearch(queryParam, settings, null, 'owner');
           setSearchResults(result.results);
           setInstantWidget(result.instantWidget);
           setConversationalAnswer(result.conversationalAnswer);
@@ -154,23 +149,35 @@ export default function App() {
         console.error('Bootstrap error:', err);
       }
     };
-
     bootstrap();
   }, []);
 
-  const handleToggleLock = () => {
-    if (masterKey) {
-      // Lock vault
-      setMasterKey(null);
-      refreshDocuments(null);
-    } else {
-      setIsUnlockModalOpen(true);
-    }
+  const openUnlock = () => {
+    setPassphraseMode('unlock');
+    setIsUnlockModalOpen(true);
   };
 
-  const handleUnlocked = async (key: CryptoKey, salt: Uint8Array) => {
+  const openCreateKey = () => {
+    setPassphraseMode('create');
+    setIsUnlockModalOpen(true);
+  };
+
+  const handleLock = () => {
+    setMasterKey(null);
+    refreshDocuments(null);
+  };
+
+  const handleUnlocked = async (
+    key: CryptoKey,
+    salt: Uint8Array,
+    _mode: 'unlock' | 'create'
+  ) => {
     setMasterKey(key);
     setVaultSalt(salt);
+    setHasVaultKey(true);
+    let b64 = '';
+    for (let i = 0; i < salt.length; i++) b64 += String.fromCharCode(salt[i]);
+    await storageEngine.setSetting('vault_salt_b64', btoa(b64));
     await refreshDocuments(key);
     if (query) {
       handlePerformSearch(query, settings);
@@ -193,18 +200,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-neutral-100">
-      {/* 3-Zone Header Contract */}
       <Header
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         isUnlocked={!!masterKey}
-        onToggleLock={handleToggleLock}
         userRole={userRole}
         documentsCount={documents.length}
         isOnline={isOnline}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1">
         {currentTab === 'search' && (
           <SearchView
@@ -221,7 +225,7 @@ export default function App() {
             settings={settings}
             onUpdateSettings={setSettings}
             isUnlocked={!!masterKey}
-            onOpenUnlockModal={() => setIsUnlockModalOpen(true)}
+            onOpenUnlockModal={openUnlock}
             allDocuments={documents}
             onNavigateTab={setCurrentTab}
           />
@@ -238,13 +242,17 @@ export default function App() {
             isUnlocked={!!masterKey}
             masterKey={masterKey}
             userRole={userRole}
+            hasVaultKey={hasVaultKey}
+            onUnlock={openUnlock}
+            onCreateKey={openCreateKey}
+            onLock={handleLock}
           />
         )}
 
         {currentTab === 'browser' && (
           <BrowserSyncView
             masterKey={masterKey}
-            onOpenUnlockModal={() => setIsUnlockModalOpen(true)}
+            onOpenUnlockModal={openUnlock}
             userRole={userRole}
             onSyncCompleted={() => refreshDocuments(masterKey)}
           />
@@ -257,29 +265,18 @@ export default function App() {
         {currentTab === 'docs' && <DocsView />}
       </main>
 
-      {/* Zero-Knowledge Passphrase Modal */}
       <PassphraseModal
         isOpen={isUnlockModalOpen}
+        mode={passphraseMode}
         onClose={() => setIsUnlockModalOpen(false)}
         onUnlocked={handleUnlocked}
         savedSalt={vaultSalt}
       />
 
-      {/* Quiet Minimalist Sovereign Footer */}
-      <footer className="py-5 border-t border-neutral-900 bg-neutral-950 text-neutral-500 text-xs">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px]">
-          <div>
-            Veritas Local-First Engine · Client-Side IndexedDB · AES-256-GCM
-          </div>
-          <div className="flex items-center gap-4 text-neutral-400">
-            <span>Machine File Explorer Index</span>
-            <span aria-hidden="true">·</span>
-            <span className={isOnline ? 'text-blue-400' : 'text-neutral-500'}>
-              {isOnline ? 'Live Web Fallback: Active' : 'Offline Mode'}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>Zero Telemetry</span>
-          </div>
+      <footer className="border-t border-neutral-900 py-4 text-neutral-600">
+        <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-2 px-4 font-mono text-[10px] sm:flex-row sm:px-6">
+          <span>Veritas · local index · AES-256-GCM</span>
+          <span>{isOnline ? 'online' : 'offline'}</span>
         </div>
       </footer>
     </div>
