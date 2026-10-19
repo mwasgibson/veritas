@@ -40,8 +40,15 @@
 - [x] Batch folder + single multi-file picker in Vault UI
 - [x] optionalDependencies: pdfjs-dist, tesseract.js
 
-## Phase 5–9
+## Phase 5 — Dual-Layer Web Fallback
+- [x] Confidence threshold gate (skip web when local is strong)
+- [x] Anonymous multi-source: Wikipedia OpenSearch + DuckDuckGo Instant Answer
+- [x] Local re-embed + BM25 re-rank of web hits
+- [x] Optional raw-page excerpts (off by default)
+- [x] credentials omit, no-referrer, minimal headers
+- [x] CSP connect-src whitelist + Referrer-Policy / nosniff headers
+
+## Phase 6–9
 - See docs/06-implementation-plan.md
-  - Phase 5: Anonymous web fallback polish
   - Phase 6: Browser extension + OpenSearch
   - Phase 7–9: Tests, CI, release
