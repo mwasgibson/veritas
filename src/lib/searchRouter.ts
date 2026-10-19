@@ -12,8 +12,8 @@ import {
   computeBM25,
   tokenize,
   synthesizeLocalAnswer,
-  fuseHybridScores,
 } from './semanticEngine';
+import { fuseHybridScores } from './rankFusion';
 import { searchSession } from './sessionContext';
 
 export interface SearchExecutionResult {
