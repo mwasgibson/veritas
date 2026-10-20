@@ -1,21 +1,39 @@
-const STORAGE_KEY = 'veritas_spa_origin';
-const DEFAULT_ORIGIN = 'http://localhost:3000';
-const originInput = document.getElementById('origin');
-const statusEl = document.getElementById('status');
-chrome.storage.local.get(STORAGE_KEY, data => {
-  originInput.value = data[STORAGE_KEY] || DEFAULT_ORIGIN;
-});
-document.getElementById('save').addEventListener('click', () => {
-  let origin = (originInput.value || '').trim().replace(/\/$/, '');
-  if (!origin.startsWith('http')) {
-    statusEl.textContent = 'URL must start with http:// or https://';
-    return;
+(function () {
+  var STORAGE_KEY = 'veritas_spa_origin';
+  var DEFAULT_ORIGIN = 'http://localhost:3000';
+  var originInput = document.getElementById('origin');
+  var statusEl = document.getElementById('status');
+
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg || '';
+    statusEl.className = isErr ? 'err' : '';
   }
-  chrome.storage.local.set({ [STORAGE_KEY]: origin }, () => {
-    statusEl.textContent = 'Saved';
+
+  chrome.storage.local.get([STORAGE_KEY], function (data) {
+    originInput.value = data[STORAGE_KEY] || DEFAULT_ORIGIN;
   });
-});
-document.getElementById('open').addEventListener('click', () => {
-  const origin = (originInput.value || DEFAULT_ORIGIN).replace(/\/$/, '');
-  chrome.tabs.create({ url: origin });
-});
+
+  document.getElementById('save').addEventListener('click', function () {
+    var origin = (originInput.value || '').trim().replace(/\/$/, '');
+    if (!/^https?:\/\//i.test(origin)) {
+      setStatus('Must start with http:// or https://', true);
+      return;
+    }
+    chrome.storage.local.set({ veritas_spa_origin: origin }, function () {
+      if (chrome.runtime.lastError) {
+        setStatus(chrome.runtime.lastError.message, true);
+        return;
+      }
+      setStatus('Saved. Omnibox will use this origin.');
+    });
+  });
+
+  document.getElementById('open').addEventListener('click', function () {
+    var origin = (originInput.value || DEFAULT_ORIGIN).trim().replace(/\/$/, '');
+    chrome.tabs.create({ url: origin });
+  });
+
+  originInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('save').click();
+  });
+})();

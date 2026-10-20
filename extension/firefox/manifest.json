@@ -1,24 +1,30 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "Veritas Private Search",
-  "version": "0.3.0",
-  "description": "Route address-bar searches to your local Veritas index first.",
+  "version": "0.3.1",
+  "description": "Search your local Veritas index from the address bar.",
   "browser_specific_settings": {
     "gecko": {
       "id": "veritas-search@local",
-      "strict_min_version": "109.0"
+      "strict_min_version": "115.0"
     }
   },
   "permissions": ["omnibox", "storage", "tabs"],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["background.js"],
+    "persistent": false
   },
   "omnibox": {
     "keyword": "v"
   },
-  "action": {
-    "default_title": "Veritas — open local search",
-    "default_popup": "popup.html"
+  "browser_action": {
+    "default_title": "Veritas Private Search",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",

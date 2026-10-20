@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Veritas Private Search",
-  "version": "0.3.0",
-  "description": "Route address-bar searches to your local Veritas index first. Query text only.",
+  "version": "0.3.1",
+  "description": "Search your local Veritas index from the address bar. Only the query is sent to your SPA — vault data stays on-device.",
   "permissions": ["omnibox", "storage", "tabs"],
   "background": {
     "service_worker": "background.js"
@@ -11,12 +11,27 @@
     "keyword": "v"
   },
   "action": {
-    "default_title": "Veritas — open local search",
-    "default_popup": "popup.html"
+    "default_title": "Veritas Private Search",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
+  },
+  "chrome_settings_overrides": {
+    "search_provider": {
+      "name": "Veritas",
+      "keyword": "veritas",
+      "search_url": "http://localhost:3000/?q={searchTerms}",
+      "encoding": "UTF-8",
+      "is_default": false,
+      "favicon_url": "http://localhost:3000/favicon.ico"
+    }
   },
   "icons": {
     "16": "icons/icon16.png",
