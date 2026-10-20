@@ -22,6 +22,7 @@ import {
 } from './types';
 import { storageEngine } from './lib/storage';
 import { executeSearch } from './lib/searchRouter';
+import { bufferToBase64, base64ToBuffer } from './lib/crypto';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'search' | 'vault' | 'browser' | 'audit' | 'docs'>('search');
@@ -116,9 +117,7 @@ export default function App() {
         const saltB64 = await storageEngine.getSetting<string>('vault_salt_b64');
         if (saltB64) {
           try {
-            const bin = atob(saltB64);
-            const salt = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) salt[i] = bin.charCodeAt(i);
+            const salt = new Uint8Array(base64ToBuffer(saltB64));
             setVaultSalt(salt);
             setHasVaultKey(true);
           } catch {
@@ -175,9 +174,14 @@ export default function App() {
     setMasterKey(key);
     setVaultSalt(salt);
     setHasVaultKey(true);
-    let b64 = '';
-    for (let i = 0; i < salt.length; i++) b64 += String.fromCharCode(salt[i]);
-    await storageEngine.setSetting('vault_salt_b64', btoa(b64));
+    try {
+      const b64 = bufferToBase64(
+        salt.buffer.slice(salt.byteOffset, salt.byteOffset + salt.byteLength)
+      );
+      await storageEngine.setSetting('vault_salt_b64', b64);
+    } catch (e) {
+      console.error('Failed to persist vault salt', e);
+    }
     await refreshDocuments(key);
     if (query) {
       handlePerformSearch(query, settings);
@@ -196,6 +200,20 @@ export default function App() {
     await refreshDocuments(masterKey);
     setSearchResults([]);
     setConversationalAnswer(undefined);
+  };
+
+  const handleResetVault = async () => {
+    await storageEngine.clearAll(userRole);
+    await storageEngine.setSetting('connected_folder', null);
+    await storageEngine.setSetting('vault_salt_b64', null);
+    setConnectedFolder(null);
+    setMasterKey(null);
+    setVaultSalt(null);
+    setHasVaultKey(false);
+    setSearchResults([]);
+    setConversationalAnswer(undefined);
+    setInstantWidget(undefined);
+    await refreshDocuments(null);
   };
 
   return (
@@ -246,6 +264,7 @@ export default function App() {
             onUnlock={openUnlock}
             onCreateKey={openCreateKey}
             onLock={handleLock}
+            onResetVault={handleResetVault}
           />
         )}
 
