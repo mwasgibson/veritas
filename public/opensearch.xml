@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
-  <ShortName>Veritas Search</ShortName>
-  <Description>Veritas Local-First Private Semantic Search Engine</Description>
-  <Tags>veritas private local search semantic vector e2ee</Tags>
-  <Contact>privacy@local.veritas</Contact>
-  <Url type="text/html" template="/?q={searchTerms}"/>
-  <Url type="application/x-suggestions+json" template="/api/suggest?q={searchTerms}"/>
-  <Image height="16" width="16" type="image/x-icon">/favicon.ico</Image>
+  <ShortName>Veritas</ShortName>
+  <Description>Local-first private semantic search — index on your device</Description>
+  <Tags>veritas private local search semantic</Tags>
+  <Url type="text/html" method="get" template="/?q={searchTerms}"/>
   <InputEncoding>UTF-8</InputEncoding>
   <OutputEncoding>UTF-8</OutputEncoding>
 </OpenSearchDescription>
