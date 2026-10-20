@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Veritas</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; width: 260px; background: #0a0a0a; color: #e5e5e5; font-size: 13px; }
+      label { display: block; color: #a3a3a3; font-size: 11px; margin-bottom: 4px; }
+      input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #404040; border-radius: 6px; background: #171717; color: #fafafa; margin-bottom: 8px; }
+      button { width: 100%; padding: 8px; border: none; border-radius: 6px; background: #f5f5f5; color: #0a0a0a; font-weight: 600; cursor: pointer; margin-bottom: 6px; }
+      button.secondary { background: transparent; border: 1px solid #404040; color: #e5e5e5; }
+      p { margin: 0 0 8px; color: #737373; font-size: 11px; line-height: 1.4; }
+      .ok { color: #86efac; font-size: 11px; min-height: 1em; }
+    </style>
+  </head>
+  <body>
+    <p>Type <strong>v</strong> then Space in the address bar to search your local index.</p>
+    <label for="origin">Veritas app URL</label>
+    <input id="origin" type="url" placeholder="http://localhost:3000" />
+    <button id="save" type="button">Save origin</button>
+    <button id="open" type="button" class="secondary">Open Veritas</button>
+    <div class="ok" id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
