@@ -2,52 +2,65 @@ const DEFAULT_ORIGIN = 'http://localhost:3000';
 const STORAGE_KEY = 'veritas_spa_origin';
 const api = typeof browser !== 'undefined' ? browser : chrome;
 
-async function getSpaOrigin() {
-  try {
-    const data = await api.storage.local.get(STORAGE_KEY);
-    const origin = data[STORAGE_KEY];
-    if (origin && typeof origin === 'string' && origin.startsWith('http')) {
+function getSpaOrigin() {
+  return api.storage.local.get(STORAGE_KEY).then(function (data) {
+    var origin = data[STORAGE_KEY];
+    if (typeof origin === 'string' && /^https?:\/\//i.test(origin)) {
       return origin.replace(/\/$/, '');
     }
-  } catch (_) {}
-  return DEFAULT_ORIGIN;
+    return DEFAULT_ORIGIN;
+  }).catch(function () {
+    return DEFAULT_ORIGIN;
+  });
 }
 
-function searchUrl(origin, query) {
-  return `${origin}/?q=${encodeURIComponent((query || '').trim())}`;
+function buildSearchUrl(origin, query) {
+  return origin + '/?q=' + encodeURIComponent(String(query || '').trim());
 }
 
-async function openSearch(query, disposition) {
-  const origin = await getSpaOrigin();
-  const url = searchUrl(origin, query);
-  if (disposition === 'currentTab') {
-    const tabs = await api.tabs.query({ active: true, currentWindow: true });
-    if (tabs[0]?.id != null) {
-      await api.tabs.update(tabs[0].id, { url });
-      return;
+function openSearch(query, inCurrentTab) {
+  return getSpaOrigin().then(function (origin) {
+    var url = buildSearchUrl(origin, query);
+    if (inCurrentTab) {
+      return api.tabs.query({ active: true, currentWindow: true }).then(function (tabs) {
+        if (tabs[0] && tabs[0].id != null) {
+          return api.tabs.update(tabs[0].id, { url: url });
+        }
+        return api.tabs.create({ url: url });
+      });
     }
-  }
-  await api.tabs.create({ url });
+    return api.tabs.create({ url: url });
+  });
 }
 
-api.omnibox.setDefaultSuggestion({
-  description: 'Search your local Veritas index (then anonymous web if enabled)',
+try {
+  api.omnibox.setDefaultSuggestion({
+    description: 'Search Veritas local index: %s',
+  });
+} catch (e) {}
+
+api.omnibox.onInputChanged.addListener(function (text, suggest) {
+  var t = String(text || '').trim();
+  if (!t) {
+    suggest([]);
+    return;
+  }
+  suggest([
+    {
+      content: t,
+      description: 'Search local index for "' + t.replace(/"/g, '') + '"',
+    },
+  ]);
 });
 
-api.omnibox.onInputChanged.addListener((text, suggest) => {
-  const t = (text || '').trim();
-  if (!t) return suggest([]);
-  suggest([{ content: t, description: t + ' — local Veritas index first' }]);
+api.omnibox.onInputEntered.addListener(function (text, disposition) {
+  openSearch(text, disposition === 'currentTab');
 });
 
-api.omnibox.onInputEntered.addListener((text, disposition) => {
-  openSearch(text, disposition === 'currentTab' ? 'currentTab' : 'newForegroundTab');
-});
-
-api.runtime.onInstalled.addListener(() => {
-  api.storage.local.get(STORAGE_KEY).then(data => {
+api.runtime.onInstalled.addListener(function () {
+  api.storage.local.get(STORAGE_KEY).then(function (data) {
     if (!data[STORAGE_KEY]) {
-      api.storage.local.set({ [STORAGE_KEY]: DEFAULT_ORIGIN });
+      return api.storage.local.set({ veritas_spa_origin: DEFAULT_ORIGIN });
     }
   });
 });

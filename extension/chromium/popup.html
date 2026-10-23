@@ -1,25 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Veritas</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; width: 260px; background: #0a0a0a; color: #e5e5e5; font-size: 13px; }
-      label { display: block; color: #a3a3a3; font-size: 11px; margin-bottom: 4px; }
-      input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #404040; border-radius: 6px; background: #171717; color: #fafafa; margin-bottom: 8px; }
-      button { width: 100%; padding: 8px; border: none; border-radius: 6px; background: #f5f5f5; color: #0a0a0a; font-weight: 600; cursor: pointer; margin-bottom: 6px; }
-      button.secondary { background: transparent; border: 1px solid #404040; color: #e5e5e5; }
-      p { margin: 0 0 8px; color: #737373; font-size: 11px; line-height: 1.4; }
-      .ok { color: #86efac; font-size: 11px; min-height: 1em; }
-    </style>
-  </head>
-  <body>
-    <p>Type <strong>v</strong> then Space in the address bar to search your local index.</p>
-    <label for="origin">Veritas app URL</label>
-    <input id="origin" type="url" placeholder="http://localhost:3000" />
-    <button id="save" type="button">Save origin</button>
-    <button id="open" type="button" class="secondary">Open Veritas</button>
-    <div class="ok" id="status"></div>
-    <script src="popup.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <title>Veritas</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 14px; width: 280px; font-family: system-ui, sans-serif; font-size: 13px; background: #0a0a0a; color: #e5e5e5; }
+    h1 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+    p { margin: 0 0 10px; color: #737373; font-size: 11px; line-height: 1.45; }
+    kbd { font-family: ui-monospace, monospace; font-size: 11px; background: #171717; border: 1px solid #404040; border-radius: 4px; padding: 1px 5px; }
+    label { display: block; color: #a3a3a3; font-size: 11px; margin-bottom: 4px; }
+    input { width: 100%; padding: 8px 10px; border: 1px solid #404040; border-radius: 6px; background: #171717; color: #fafafa; margin-bottom: 10px; font-size: 12px; }
+    .row { display: flex; gap: 6px; }
+    button { flex: 1; padding: 8px 10px; border: none; border-radius: 6px; background: #f5f5f5; color: #0a0a0a; font-weight: 600; font-size: 12px; cursor: pointer; }
+    button.secondary { background: transparent; border: 1px solid #404040; color: #e5e5e5; }
+    #status { min-height: 1.2em; margin-top: 8px; font-size: 11px; color: #86efac; }
+    #status.err { color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <h1>Veritas</h1>
+  <p>Address bar: type <kbd>v</kbd> then <kbd>Tab</kbd> or <kbd>Space</kbd>, your query, Enter. Or keyword <kbd>veritas</kbd>.</p>
+  <label for="origin">App URL</label>
+  <input id="origin" type="url" placeholder="http://localhost:3000" autocomplete="off" />
+  <div class="row">
+    <button id="save" type="button">Save</button>
+    <button id="open" type="button" class="secondary">Open</button>
+  </div>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
 </html>
