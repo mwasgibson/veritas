@@ -5,7 +5,7 @@ Local-first search interception. **Only the query string** is handed to your Ver
 ## Packages
 
 | Folder | Target |
-|--------|--------|
+| -------- | -------- |
 | `chromium/` | Chrome, Edge, Brave, Arc (Manifest V3) |
 | `firefox/` | Firefox 109+ (Manifest V3) |
 | `safari/` | Packaging notes for Safari Web Extension |
